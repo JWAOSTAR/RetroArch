@@ -1473,11 +1473,11 @@ static ozone_theme_t ozone_theme_gray_dark = {
 static ozone_theme_t ozone_theme_red_dark = {
    /* Background color */
    COLOR_HEX_TO_FLOAT(0x101010, 1.0f),                   /* background */
-   ozone_background_libretro_running_gray_light,          /* background_libretro_running */
+   ozone_background_libretro_running_gray_dark,          /* background_libretro_running */
 
    /* Float colors for quads and icons */
    COLOR_HEX_TO_FLOAT(0x000000, 0.0f),                   /* header_footer_separator */
-   COLOR_HEX_TO_FLOAT(0xFFFFFF, 1.0f),                   /* text */
+   COLOR_HEX_TO_FLOAT(0xFF0000, 1.0f),                   /* text */
    COLOR_HEX_TO_FLOAT(0xFF0000, 1.0f),                   /* selection */
    COLOR_HEX_TO_FLOAT(0xFF0000, 1.0f),                   /* selection_border */
    COLOR_HEX_TO_FLOAT(0x181818, 1.0f),                   /* entries_border */
@@ -1486,7 +1486,7 @@ static ozone_theme_t ozone_theme_red_dark = {
    COLOR_HEX_TO_FLOAT(0x202020, 1.0f),                   /* message_background */
 
    /* RGBA colors for text */
-   0xFF0000FF,                                           /* text_rgba */
+   0xFFFFFFFF,                                           /* text_rgba */
    0x808080FF,                                           /* text_sidebar_rgba */
    0xFFFFFFFF,                                           /* text_selected_rgba */
    0x870000FF,                                           /* text_sublabel_rgba */
