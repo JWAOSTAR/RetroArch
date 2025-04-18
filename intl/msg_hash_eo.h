@@ -538,14 +538,6 @@ MSG_HASH(
 /* Settings > Input */
 
 MSG_HASH(
-   MENU_ENUM_LABEL_VALUE_INPUT_REMAP_SORT_BY_CONTROLLER_ENABLE,
-   "Sort Remaps By Gamepad"
-   )   
-MSG_HASH(
-   MENU_ENUM_SUBLABEL_INPUT_REMAP_SORT_BY_CONTROLLER_ENABLE,
-   "Remaps will only apply to the active gamepad in which they were saved."
-   )   
-MSG_HASH(
    MENU_ENUM_LABEL_VALUE_INPUT_AUTODETECT_ENABLE,
    "Autoconfig Enable"
    )
@@ -553,6 +545,7 @@ MSG_HASH(
 #endif
 #ifdef ANDROID
 #endif
+
 MSG_HASH(
    MENU_ENUM_LABEL_VALUE_INPUT_HOTKEY_BINDS,
    "Enable hotkeys"
@@ -583,10 +576,6 @@ MSG_HASH(
 
 /* Settings > Input > Port # Controls */
 
-MSG_HASH(
-   MENU_ENUM_LABEL_VALUE_INPUT_TURBO_ENABLE,
-   "Turbo enable"
-   )
 
 /* Settings > Latency */
 
@@ -1047,6 +1036,8 @@ MSG_HASH(
 /* Ozone: Settings > User Interface > Appearance */
 
 
+
+
 /* MaterialUI: Settings > User Interface > Appearance */
 
 
@@ -1231,4 +1222,11 @@ MSG_HASH(
    )
 #endif
 #ifdef HAVE_QT
+#endif
+#ifdef HAVE_GAME_AI
+
+
+
+
+
 #endif

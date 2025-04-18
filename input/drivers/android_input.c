@@ -81,7 +81,7 @@ enum {
 #endif
 
 /* Use this to enable/disable using the touch screen as mouse */
-#define ENABLE_TOUCH_SCREEN_MOUSE 1
+#define ENABLE_TOUCH_SCREEN_MOUSE 0
 
 #define AKEYCODE_ASSIST 219
 
@@ -102,9 +102,6 @@ uint8_t *android_keyboard_state_get(unsigned port)
    return android_key_state[port];
 }
 
-/* TODO/FIXME -
- * fix game focus toggle */
-
 typedef struct
 {
    float x;
@@ -115,6 +112,7 @@ typedef struct
 struct input_pointer
 {
    int16_t x, y;
+   int16_t confined_x, confined_y;
    int16_t full_x, full_y;
 };
 
@@ -818,16 +816,20 @@ static INLINE void android_input_poll_event_type_motion(
 
       for (motion_ptr = 0; motion_ptr < pointer_max; motion_ptr++)
       {
-         struct video_viewport vp;
+         struct video_viewport vp = {0};
          float x = AMotionEvent_getX(event, motion_ptr);
          float y = AMotionEvent_getY(event, motion_ptr);
 
-         vp.x                        = 0;
-         vp.y                        = 0;
-         vp.width                    = 0;
-         vp.height                   = 0;
-         vp.full_width               = 0;
-         vp.full_height              = 0;
+         /* On other platforms, pointer query uses the confined wrap function, *
+          * but some extra functionality is added to Android which needs the   *
+          * true offscreen value -0x8000, so both variants are called. */
+         video_driver_translate_coord_viewport_confined_wrap(
+               &vp,
+               x, y,
+               &android->pointer[motion_ptr].confined_x,
+               &android->pointer[motion_ptr].confined_y,
+               &android->pointer[motion_ptr].full_x,
+               &android->pointer[motion_ptr].full_y);
 
          video_driver_translate_coord_viewport_wrap(
                &vp,
@@ -1605,8 +1607,7 @@ static void android_input_poll_user(android_input_t *android)
    }
 }
 
-/* Handle all events. If our activity is in pause state,
- * block until we're unpaused.
+/* Handle all events.
  */
 static void android_input_poll(void *data)
 {
@@ -1616,11 +1617,7 @@ static void android_input_poll(void *data)
    settings_t            *settings = config_get_ptr();
 
    while ((ident =
-            ALooper_pollAll((input_config_binds[0][RARCH_PAUSE_TOGGLE].valid 
-               && input_key_pressed(RARCH_PAUSE_TOGGLE,
-                  ANDROID_KEYBOARD_PORT_INPUT_PRESSED(input_config_binds[0],
-                     RARCH_PAUSE_TOGGLE)))
-               ? -1 : settings->uints.input_block_timeout,
+            ALooper_pollAll(settings->uints.input_block_timeout,
                NULL, NULL, NULL)) >= 0)
    {
       switch (ident)
@@ -1721,7 +1718,9 @@ static int16_t android_input_state(
             if (binds[port][id].valid)
             {
                if (     (binds[port][id].key && binds[port][id].key < RETROK_LAST)
-                     && ANDROID_KEYBOARD_PORT_INPUT_PRESSED(binds[port], id))
+                     && ANDROID_KEYBOARD_PORT_INPUT_PRESSED(binds[port], id)
+                     && (id == RARCH_GAME_FOCUS_TOGGLE || !keyboard_mapping_blocked)
+                     )
                   return 1;
             }
          }
@@ -1733,10 +1732,8 @@ static int16_t android_input_state(
       case RETRO_DEVICE_MOUSE:
       case RARCH_DEVICE_MOUSE_SCREEN:
          {
+            /* Same mouse state is reported for all ports. */
             int val = 0;
-            if (port > 0)
-               break; /* TODO: implement mouse for additional ports/players */
-
             switch (id)
             {
                case RETRO_DEVICE_ID_MOUSE_LEFT:
@@ -1774,11 +1771,15 @@ static int16_t android_input_state(
          break;
       case RETRO_DEVICE_LIGHTGUN:
          {
+            /* Same lightgun state is reported for all ports. */
             int val = 0;
-            if (port > 0)
-               break; /* TODO: implement lightgun for additional ports/players */
             switch (id)
             {
+               case RETRO_DEVICE_ID_LIGHTGUN_SCREEN_X:
+                  return android->pointer[idx].x;
+               case RETRO_DEVICE_ID_LIGHTGUN_SCREEN_Y:
+                  return android->pointer[idx].y;
+               /* Deprecated relative lightgun. */
                case RETRO_DEVICE_ID_LIGHTGUN_X:
                   val                    = android->mouse_x_delta;
                   android->mouse_x_delta = 0;
@@ -1789,32 +1790,36 @@ static int16_t android_input_state(
                   android->mouse_y_delta = 0;
                   /* flush delta after it has been read */
                   return val;
-               case RETRO_DEVICE_ID_LIGHTGUN_TRIGGER:
-                  return android->mouse_l || android_check_quick_tap(android);
                case RETRO_DEVICE_ID_LIGHTGUN_CURSOR:
-                  return android->mouse_m;
-               case RETRO_DEVICE_ID_LIGHTGUN_TURBO:
-                  return android->mouse_r;
+               case RETRO_DEVICE_ID_LIGHTGUN_RELOAD:
+                  return android->mouse_m || android->pointer_count == 3;
+               case RETRO_DEVICE_ID_LIGHTGUN_SELECT:
+                  return android->mouse_r && android->mouse_l;
                case RETRO_DEVICE_ID_LIGHTGUN_START:
-                  return android->mouse_m && android->mouse_r;
-               case RETRO_DEVICE_ID_LIGHTGUN_PAUSE:
-                  return android->mouse_m && android->mouse_l;
+               case RETRO_DEVICE_ID_LIGHTGUN_TURBO:
+                  return android->mouse_r || android->pointer_count == 2;
+               case RETRO_DEVICE_ID_LIGHTGUN_TRIGGER:
+                  return android->mouse_l || android_check_quick_tap(android) || android->pointer_count == 1;
+               case RETRO_DEVICE_ID_LIGHTGUN_IS_OFFSCREEN:
+                  return input_driver_pointer_is_offscreen(android->pointer[idx].x, android->pointer[idx].y);
             }
          }
          break;
       case RETRO_DEVICE_POINTER:
       case RARCH_DEVICE_POINTER_SCREEN:
+         /* Same pointer state is reported for all ports. */
          switch (id)
          {
             case RETRO_DEVICE_ID_POINTER_X:
                if (device == RARCH_DEVICE_POINTER_SCREEN)
                   return android->pointer[idx].full_x;
-               return android->pointer[idx].x;
+               return android->pointer[idx].confined_x;
             case RETRO_DEVICE_ID_POINTER_Y:
                if (device == RARCH_DEVICE_POINTER_SCREEN)
                   return android->pointer[idx].full_y;
-               return android->pointer[idx].y;
+               return android->pointer[idx].confined_y;
             case RETRO_DEVICE_ID_POINTER_PRESSED:
+               /* On mobile platforms, touches outside screen / core viewport are not reported. */
                if (device == RARCH_DEVICE_POINTER_SCREEN)
                   return (idx < android->pointer_count) &&
                      (android->pointer[idx].full_x != -0x8000) &&
@@ -1822,6 +1827,8 @@ static int16_t android_input_state(
                return (idx < android->pointer_count) &&
                   (android->pointer[idx].x != -0x8000) &&
                   (android->pointer[idx].y != -0x8000);
+            case RETRO_DEVICE_ID_POINTER_IS_OFFSCREEN:
+               return input_driver_pointer_is_offscreen(android->pointer[idx].x, android->pointer[idx].y);
             case RETRO_DEVICE_ID_POINTER_COUNT:
                return android->pointer_count;
             case RARCH_DEVICE_ID_POINTER_BACK:

@@ -20,7 +20,7 @@
 
 RETRO_BEGIN_DECLS
 
-enum
+enum poll_type
 {
    /* Polling is performed before
     * call to retro_run. */
@@ -128,6 +128,7 @@ enum rarch_override_setting
    RARCH_OVERRIDE_SETTING_LIBRETRO_DEVICE,
    RARCH_OVERRIDE_SETTING_LOG_TO_FILE,
    RARCH_OVERRIDE_SETTING_DATABASE_SCAN,
+   RARCH_OVERRIDE_SETTING_OVERLAY_PRESET,
    RARCH_OVERRIDE_SETTING_LAST
 };
 

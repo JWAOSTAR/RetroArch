@@ -269,7 +269,8 @@ retro_time_t cpu_features_get_time_usec(void)
 #endif
 
 #if defined(CPU_X86) && !defined(__MACH__)
-void x86_cpuid(int func, int flags[4])
+#include <limits.h>
+void x86_cpuid(int func, int32_t flags[4])
 {
    /* On Android, we compile RetroArch with PIC, and we
     * are not allowed to clobber the ebx register. */
@@ -288,8 +289,8 @@ void x86_cpuid(int func, int flags[4])
          "xchg %%" REG_b ", %%" REG_S "\n"
          : "=a"(flags[0]), "=S"(flags[1]), "=c"(flags[2]), "=d"(flags[3])
          : "a"(func));
-#elif defined(_MSC_VER)
-   __cpuid(flags, func);
+#elif defined(_MSC_VER) && INT_MAX == 2147483647
+   __cpuid((int*)flags, func);
 #else
 #ifndef NDEBUG
    printf("Unknown compiler. Cannot check CPUID with inline assembly.\n");
@@ -421,10 +422,10 @@ static const char *parse_decimal(const char* input,
  *             2,4-127,128-143
  *             0-1
  **/
-static void cpulist_parse(CpuList* list, char **buf, ssize_t length)
+static void cpulist_parse(CpuList* list, char **buf, ssize_t len)
 {
    const char* p   = (const char*)buf;
-   const char* end = p + length;
+   const char* end = p + len;
 
    /* NOTE: the input line coming from sysfs typically contains a
     * trailing newline, so take care of it in the code below
@@ -474,15 +475,15 @@ static void cpulist_parse(CpuList* list, char **buf, ssize_t length)
  **/
 static void cpulist_read_from(CpuList* list, const char* filename)
 {
-   ssize_t length;
+   ssize_t _len;
    char *buf  = NULL;
 
    list->mask = 0;
 
-   if (filestream_read_file(filename, (void**)&buf, &length) != 1)
+   if (filestream_read_file(filename, (void**)&buf, &_len) != 1)
       return;
 
-   cpulist_parse(list, &buf, length);
+   cpulist_parse(list, &buf, _len);
    if (buf)
       free(buf);
    buf = NULL;
@@ -547,15 +548,15 @@ unsigned cpu_features_get_core_amount(void)
    /* Copypasta from stackoverflow, dunno if it works. */
    int num_cpu = 0;
    int mib[4];
-   size_t len = sizeof(num_cpu);
+   size_t _len = sizeof(num_cpu);
 
    mib[0] = CTL_HW;
    mib[1] = HW_AVAILCPU;
-   sysctl(mib, 2, &num_cpu, &len, NULL, 0);
+   sysctl(mib, 2, &num_cpu, &_len, NULL, 0);
    if (num_cpu < 1)
    {
       mib[1] = HW_NCPU;
-      sysctl(mib, 2, &num_cpu, &len, NULL, 0);
+      sysctl(mib, 2, &num_cpu, &_len, NULL, 0);
       if (num_cpu < 1)
          num_cpu = 1;
    }
@@ -598,74 +599,60 @@ uint64_t cpu_features_get(void)
    const int avx_flags = (1 << 27) | (1 << 28);
 #endif
 #if defined(__MACH__)
-   size_t len          = sizeof(size_t);
-
-   if (sysctlbyname("hw.optional.floatingpoint", NULL, &len, NULL, 0) == 0)
+   size_t _len          = sizeof(size_t);
+   if (sysctlbyname("hw.optional.floatingpoint", NULL, &_len, NULL, 0) == 0)
       cpu |= RETRO_SIMD_CMOV;
 
 #if defined(CPU_X86)
-   len            = sizeof(size_t);
-   if (sysctlbyname("hw.optional.mmx", NULL, &len, NULL, 0) == 0)
+   _len            = sizeof(size_t);
+   if (sysctlbyname("hw.optional.mmx", NULL, &_len, NULL, 0) == 0)
       cpu |= RETRO_SIMD_MMX | RETRO_SIMD_MMXEXT;
-
-   len            = sizeof(size_t);
-   if (sysctlbyname("hw.optional.sse", NULL, &len, NULL, 0) == 0)
+   _len            = sizeof(size_t);
+   if (sysctlbyname("hw.optional.sse", NULL, &_len, NULL, 0) == 0)
       cpu |= RETRO_SIMD_SSE;
-
-   len            = sizeof(size_t);
-   if (sysctlbyname("hw.optional.sse2", NULL, &len, NULL, 0) == 0)
+   _len            = sizeof(size_t);
+   if (sysctlbyname("hw.optional.sse2", NULL, &_len, NULL, 0) == 0)
       cpu |= RETRO_SIMD_SSE2;
-
-   len            = sizeof(size_t);
-   if (sysctlbyname("hw.optional.sse3", NULL, &len, NULL, 0) == 0)
+   _len            = sizeof(size_t);
+   if (sysctlbyname("hw.optional.sse3", NULL, &_len, NULL, 0) == 0)
       cpu |= RETRO_SIMD_SSE3;
-
-   len            = sizeof(size_t);
-   if (sysctlbyname("hw.optional.supplementalsse3", NULL, &len, NULL, 0) == 0)
+   _len            = sizeof(size_t);
+   if (sysctlbyname("hw.optional.supplementalsse3", NULL, &_len, NULL, 0) == 0)
       cpu |= RETRO_SIMD_SSSE3;
-
-   len            = sizeof(size_t);
-   if (sysctlbyname("hw.optional.sse4_1", NULL, &len, NULL, 0) == 0)
+   _len            = sizeof(size_t);
+   if (sysctlbyname("hw.optional.sse4_1", NULL, &_len, NULL, 0) == 0)
       cpu |= RETRO_SIMD_SSE4;
-
-   len            = sizeof(size_t);
-   if (sysctlbyname("hw.optional.sse4_2", NULL, &len, NULL, 0) == 0)
+   _len            = sizeof(size_t);
+   if (sysctlbyname("hw.optional.sse4_2", NULL, &_len, NULL, 0) == 0)
       cpu |= RETRO_SIMD_SSE42;
-
-   len            = sizeof(size_t);
-   if (sysctlbyname("hw.optional.aes", NULL, &len, NULL, 0) == 0)
+   _len            = sizeof(size_t);
+   if (sysctlbyname("hw.optional.aes", NULL, &_len, NULL, 0) == 0)
       cpu |= RETRO_SIMD_AES;
-
-   len            = sizeof(size_t);
-   if (sysctlbyname("hw.optional.avx1_0", NULL, &len, NULL, 0) == 0)
+   _len            = sizeof(size_t);
+   if (sysctlbyname("hw.optional.avx1_0", NULL, &_len, NULL, 0) == 0)
       cpu |= RETRO_SIMD_AVX;
-
-   len            = sizeof(size_t);
-   if (sysctlbyname("hw.optional.avx2_0", NULL, &len, NULL, 0) == 0)
+   _len            = sizeof(size_t);
+   if (sysctlbyname("hw.optional.avx2_0", NULL, &_len, NULL, 0) == 0)
       cpu |= RETRO_SIMD_AVX2;
-
-   len            = sizeof(size_t);
-   if (sysctlbyname("hw.optional.altivec", NULL, &len, NULL, 0) == 0)
+   _len            = sizeof(size_t);
+   if (sysctlbyname("hw.optional.altivec", NULL, &_len, NULL, 0) == 0)
       cpu |= RETRO_SIMD_VMX;
-
 #else
-   len            = sizeof(size_t);
-   if (sysctlbyname("hw.optional.neon", NULL, &len, NULL, 0) == 0)
+   _len            = sizeof(size_t);
+   if (sysctlbyname("hw.optional.neon", NULL, &_len, NULL, 0) == 0)
       cpu |= RETRO_SIMD_NEON;
-
-   len            = sizeof(size_t);
-   if (sysctlbyname("hw.optional.neon_fp16", NULL, &len, NULL, 0) == 0)
+   _len            = sizeof(size_t);
+   if (sysctlbyname("hw.optional.neon_fp16", NULL, &_len, NULL, 0) == 0)
       cpu |= RETRO_SIMD_VFPV3;
-
-   len            = sizeof(size_t);
-   if (sysctlbyname("hw.optional.neon_hpfp", NULL, &len, NULL, 0) == 0)
+   _len            = sizeof(size_t);
+   if (sysctlbyname("hw.optional.neon_hpfp", NULL, &_len, NULL, 0) == 0)
       cpu |= RETRO_SIMD_VFPV4;
 #endif
 #elif defined(_XBOX1)
    cpu |= RETRO_SIMD_MMX | RETRO_SIMD_SSE | RETRO_SIMD_MMXEXT;
 #elif defined(CPU_X86)
    unsigned max_flag   = 0;
-   int flags[4];
+   int32_t flags[4];
    int vendor_shuffle[3];
    char vendor[13];
    x86_cpuid(0, flags);
@@ -803,7 +790,7 @@ uint64_t cpu_features_get(void)
    return cpu;
 }
 
-void cpu_features_get_model_name(char *name, int len)
+void cpu_features_get_model_name(char *s, int len)
 {
 #if defined(CPU_X86) && !defined(__MACH__)
    union {
@@ -815,7 +802,7 @@ void cpu_features_get_model_name(char *name, int len)
    int pos = 0;
    bool start = false;
 
-   if (!name)
+   if (!s)
       return;
 
    x86_cpuid(0x80000000, flags.i);
@@ -839,26 +826,26 @@ void cpu_features_get_model_name(char *name, int len)
          if (pos == len - 1)
          {
             /* truncate if we ran out of room */
-            name[pos] = '\0';
+            s[pos] = '\0';
             goto end;
          }
 
-         name[pos++] = flags.s[j];
+         s[pos++] = flags.s[j];
       }
    }
 end:
    /* terminate our string */
    if (pos < len)
-      name[pos] = '\0';
+      s[pos] = '\0';
 #elif defined(__MACH__)
-   if (!name)
+   if (!s)
       return;
    {
-      size_t len_size = len;
-      sysctlbyname("machdep.cpu.brand_string", name, &len_size, NULL, 0);
+      size_t __len = len;
+      sysctlbyname("machdep.cpu.brand_string", s, &__len, NULL, 0);
    }
 #elif defined(__linux__)
-   if (!name)
+   if (!s)
       return;
    {
       char *model_name, line[128];
@@ -877,8 +864,8 @@ end:
          if ((model_name = strstr(line + 10, ": ")))
          {
             model_name += 2;
-            strncpy(name, model_name, len);
-            name[len - 1] = '\0';
+            strncpy(s, model_name, len);
+            s[len - 1] = '\0';
          }
 
          break;
@@ -886,9 +873,5 @@ end:
 
       filestream_close(fp);
    }
-#else
-   if (!name)
-      return;
-   return;
 #endif
 }
