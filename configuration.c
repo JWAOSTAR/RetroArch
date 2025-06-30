@@ -161,6 +161,7 @@ enum microphone_driver_enum
    MICROPHONE_SDL2,
    MICROPHONE_WASAPI,
    MICROPHONE_PIPEWIRE,
+   MICROPHONE_COREAUDIO,
    MICROPHONE_NULL
 };
 
@@ -373,6 +374,7 @@ const struct input_bind_map input_config_bind_map[RARCH_BIND_LIST_END_NULL] = {
    DECLARE_META_BIND(2, disk_prev,             RARCH_DISK_PREV,              MENU_ENUM_LABEL_VALUE_INPUT_META_DISK_PREV),
 
    DECLARE_META_BIND(2, shader_toggle,         RARCH_SHADER_TOGGLE,          MENU_ENUM_LABEL_VALUE_INPUT_META_SHADER_TOGGLE),
+   DECLARE_META_BIND(2, shader_hold,           RARCH_SHADER_HOLD,            MENU_ENUM_LABEL_VALUE_INPUT_META_SHADER_HOLD),
    DECLARE_META_BIND(2, shader_next,           RARCH_SHADER_NEXT,            MENU_ENUM_LABEL_VALUE_INPUT_META_SHADER_NEXT),
    DECLARE_META_BIND(2, shader_prev,           RARCH_SHADER_PREV,            MENU_ENUM_LABEL_VALUE_INPUT_META_SHADER_PREV),
 
@@ -407,10 +409,6 @@ const struct input_bind_map input_config_bind_map[RARCH_BIND_LIST_END_NULL] = {
    DECLARE_META_BIND(2, overlay_next,          RARCH_OVERLAY_NEXT,           MENU_ENUM_LABEL_VALUE_INPUT_META_OVERLAY_NEXT),
 
    DECLARE_META_BIND(2, osk_toggle,            RARCH_OSK,                    MENU_ENUM_LABEL_VALUE_INPUT_META_OSK),
-#if 0
-   /* Deprecated */
-   DECLARE_META_BIND(2, send_debug_info,       RARCH_SEND_DEBUG_INFO,        MENU_ENUM_LABEL_VALUE_INPUT_META_SEND_DEBUG_INFO),
-#endif
 };
 
 #if defined(HAVE_METAL)
@@ -582,6 +580,8 @@ static const enum microphone_driver_enum MICROPHONE_DEFAULT_DRIVER = MICROPHONE_
 #elif defined(HAVE_SDL2)
 /* The default fallback driver is SDL2, if available. */
 static const enum microphone_driver_enum MICROPHONE_DEFAULT_DRIVER = MICROPHONE_SDL2;
+#elif defined(HAVE_COREAUDIO)
+static const enum microphone_driver_enum MICROPHONE_DEFAULT_DRIVER = MICROPHONE_COREAUDIO;
 #else
 static const enum microphone_driver_enum MICROPHONE_DEFAULT_DRIVER = MICROPHONE_NULL;
 #endif
@@ -589,7 +589,7 @@ static const enum microphone_driver_enum MICROPHONE_DEFAULT_DRIVER = MICROPHONE_
 
 #if defined(RS90) || defined(MIYOO)
 static const enum audio_resampler_driver_enum AUDIO_DEFAULT_RESAMPLER_DRIVER = AUDIO_RESAMPLER_NEAREST;
-#elif defined(PSP) || defined(EMSCRIPTEN)
+#elif defined(PSP) || (defined(EMSCRIPTEN) && defined(HAVE_CC_RESAMPLER))
 static const enum audio_resampler_driver_enum AUDIO_DEFAULT_RESAMPLER_DRIVER = AUDIO_RESAMPLER_CC;
 #else
 static const enum audio_resampler_driver_enum AUDIO_DEFAULT_RESAMPLER_DRIVER = AUDIO_RESAMPLER_SINC;
@@ -1012,6 +1012,8 @@ const char *config_get_default_microphone(void)
          return "wasapi";
       case MICROPHONE_SDL2:
          return "sdl2";
+      case MICROPHONE_COREAUDIO:
+         return "coreaudio";
       case MICROPHONE_NULL:
          break;
    }
@@ -1691,6 +1693,9 @@ static struct config_path_setting *populate_settings_path(
 #ifdef HAVE_XMB
    SETTING_PATH("xmb_font",                      settings->paths.path_menu_xmb_font, false, NULL, true);
 #endif
+#ifdef HAVE_OZONE
+   SETTING_PATH("ozone_font",                    settings->paths.path_menu_ozone_font, false, NULL, true);
+#endif
 #endif /* HAVE_MENU */
 
 #ifdef HAVE_OVERLAY
@@ -1811,6 +1816,7 @@ static struct config_bool_setting *populate_settings_bool(
    SETTING_BOOL("remap_save_on_exit",            &settings->bools.remap_save_on_exit, true, DEFAULT_REMAP_SAVE_ON_EXIT, false);
    SETTING_BOOL("show_hidden_files",             &settings->bools.show_hidden_files, true, DEFAULT_SHOW_HIDDEN_FILES, false);
    SETTING_BOOL("use_last_start_directory",      &settings->bools.use_last_start_directory, true, DEFAULT_USE_LAST_START_DIRECTORY, false);
+   SETTING_BOOL("core_suggest_always",           &settings->bools.core_suggest_always, true, DEFAULT_CORE_SUGGEST_ALWAYS, false);
    SETTING_BOOL("camera_allow",                  &settings->bools.camera_allow, true, false, false);
    SETTING_BOOL("location_allow",                &settings->bools.location_allow, true, false, false);
    SETTING_BOOL("cloud_sync_enable",             &settings->bools.cloud_sync_enable, true, false, false);
@@ -1914,6 +1920,9 @@ static struct config_bool_setting *populate_settings_bool(
    SETTING_BOOL("video_gpu_screenshot",          &settings->bools.video_gpu_screenshot, true, DEFAULT_GPU_SCREENSHOT, false);
    SETTING_BOOL("video_post_filter_record",      &settings->bools.video_post_filter_record, true, DEFAULT_POST_FILTER_RECORD, false);
    SETTING_BOOL("video_notch_write_over_enable", &settings->bools.video_notch_write_over_enable, true, DEFAULT_NOTCH_WRITE_OVER_ENABLE, false);
+#if defined(__APPLE__) && defined(HAVE_VULKAN)
+   SETTING_BOOL("video_use_metal_arg_buffers",   &settings->bools.video_use_metal_arg_buffers, true, DEFAULT_USE_METAL_ARG_BUFFERS, false);
+#endif
    SETTING_BOOL("video_msg_bgcolor_enable",      &settings->bools.video_msg_bgcolor_enable, true, DEFAULT_MESSAGE_BGCOLOR_ENABLE, false);
    SETTING_BOOL("video_window_show_decorations", &settings->bools.video_window_show_decorations, true, DEFAULT_WINDOW_DECORATIONS, false);
    SETTING_BOOL("video_window_save_positions",   &settings->bools.video_window_save_positions, true, DEFAULT_WINDOW_SAVE_POSITIONS, false);
@@ -2020,6 +2029,7 @@ static struct config_bool_setting *populate_settings_bool(
 
    SETTING_BOOL("content_show_settings",         &settings->bools.menu_content_show_settings, true, DEFAULT_CONTENT_SHOW_SETTINGS, false);
    SETTING_BOOL("content_show_favorites",        &settings->bools.menu_content_show_favorites, true, DEFAULT_CONTENT_SHOW_FAVORITES, false);
+   SETTING_BOOL("content_show_favorites_first",  &settings->bools.menu_content_show_favorites_first, true, DEFAULT_CONTENT_SHOW_FAVORITES_FIRST, false);
 #ifdef HAVE_IMAGEVIEWER
    SETTING_BOOL("content_show_images",           &settings->bools.menu_content_show_images, true, DEFAULT_CONTENT_SHOW_IMAGES, false);
 #endif
@@ -2072,6 +2082,7 @@ static struct config_bool_setting *populate_settings_bool(
    SETTING_BOOL("menu_navigation_wraparound_enable", &settings->bools.menu_navigation_wraparound_enable, true, true, false);
    SETTING_BOOL("menu_navigation_browser_filter_supported_extensions_enable", &settings->bools.menu_navigation_browser_filter_supported_extensions_enable, true, true, false);
    SETTING_BOOL("menu_show_advanced_settings",   &settings->bools.menu_show_advanced_settings, true, DEFAULT_SHOW_ADVANCED_SETTINGS, false);
+   SETTING_BOOL("menu_thumbnail_background_enable", &settings->bools.menu_thumbnail_background_enable, true, DEFAULT_MENU_THUMBNAIL_BACKGROUND_ENABLE, false);
 #ifdef HAVE_MATERIALUI
    SETTING_BOOL("materialui_icons_enable",                    &settings->bools.menu_materialui_icons_enable, true, DEFAULT_MATERIALUI_ICONS_ENABLE, false);
    SETTING_BOOL("materialui_switch_icons",                    &settings->bools.menu_materialui_switch_icons, true, DEFAULT_MATERIALUI_SWITCH_ICONS, false);
@@ -2296,6 +2307,14 @@ static struct config_float_setting *populate_settings_float(
 #endif
 #ifdef HAVE_OZONE
    SETTING_FLOAT("ozone_thumbnail_scale_factor", &settings->floats.ozone_thumbnail_scale_factor, true, DEFAULT_OZONE_THUMBNAIL_SCALE_FACTOR, false);
+   SETTING_FLOAT("ozone_padding_factor",         &settings->floats.ozone_padding_factor, true, DEFAULT_OZONE_PADDING_FACTOR, false);
+   SETTING_FLOAT("ozone_font_scale_factor_global",   &settings->floats.ozone_font_scale_factor_global, true, DEFAULT_OZONE_FONT_SCALE_FACTOR_GLOBAL, false);
+   SETTING_FLOAT("ozone_font_scale_factor_title",    &settings->floats.ozone_font_scale_factor_title, true, DEFAULT_OZONE_FONT_SCALE_FACTOR_TITLE, false);
+   SETTING_FLOAT("ozone_font_scale_factor_sidebar",  &settings->floats.ozone_font_scale_factor_sidebar, true, DEFAULT_OZONE_FONT_SCALE_FACTOR_SIDEBAR, false);
+   SETTING_FLOAT("ozone_font_scale_factor_label",    &settings->floats.ozone_font_scale_factor_label, true, DEFAULT_OZONE_FONT_SCALE_FACTOR_LABEL, false);
+   SETTING_FLOAT("ozone_font_scale_factor_sublabel", &settings->floats.ozone_font_scale_factor_sublabel, true, DEFAULT_OZONE_FONT_SCALE_FACTOR_SUBLABEL, false);
+   SETTING_FLOAT("ozone_font_scale_factor_time",     &settings->floats.ozone_font_scale_factor_time, true, DEFAULT_OZONE_FONT_SCALE_FACTOR_TIME, false);
+   SETTING_FLOAT("ozone_font_scale_factor_footer",   &settings->floats.ozone_font_scale_factor_footer, true, DEFAULT_OZONE_FONT_SCALE_FACTOR_FOOTER, false);
 #endif
 #endif /* HAVE_MENU */
 
@@ -2442,6 +2461,8 @@ static struct config_uint_setting *populate_settings_uint(
 #endif
 #ifdef HAVE_OZONE
    SETTING_UINT("ozone_menu_color_theme",        &settings->uints.menu_ozone_color_theme, true, DEFAULT_OZONE_COLOR_THEME, false);
+   SETTING_UINT("ozone_header_separator",        &settings->uints.menu_ozone_header_separator, true, DEFAULT_OZONE_HEADER_SEPARATOR, false);
+   SETTING_UINT("ozone_font_scale",              &settings->uints.menu_ozone_font_scale, true, DEFAULT_OZONE_FONT_SCALE, false);
 #endif
 #endif /* HAVE_MENU */
 
@@ -2500,7 +2521,6 @@ static struct config_uint_setting *populate_settings_uint(
    SETTING_UINT("video_hard_sync_frames",        &settings->uints.video_hard_sync_frames, true, DEFAULT_HARD_SYNC_FRAMES, false);
    SETTING_UINT("video_frame_delay",             &settings->uints.video_frame_delay,      true, DEFAULT_FRAME_DELAY, false);
    SETTING_UINT("video_max_swapchain_images",    &settings->uints.video_max_swapchain_images, true, DEFAULT_MAX_SWAPCHAIN_IMAGES, false);
-   SETTING_UINT("video_max_frame_latency",       &settings->uints.video_max_frame_latency, true, DEFAULT_MAX_FRAME_LATENCY, false);
    SETTING_UINT("video_black_frame_insertion",   &settings->uints.video_black_frame_insertion, true, DEFAULT_BLACK_FRAME_INSERTION, false);
    SETTING_UINT("video_bfi_dark_frames",         &settings->uints.video_bfi_dark_frames, true, DEFAULT_BFI_DARK_FRAMES, false);
    SETTING_UINT("video_shader_subframes",        &settings->uints.video_shader_subframes, true, DEFAULT_SHADER_SUBFRAMES, false);
@@ -2682,10 +2702,12 @@ static struct config_int_setting *populate_settings_int(
 
    SETTING_INT("crt_switch_center_adjust",       &settings->ints.crt_switch_center_adjust, false, DEFAULT_CRT_SWITCH_CENTER_ADJUST, false);
    SETTING_INT("crt_switch_porch_adjust",        &settings->ints.crt_switch_porch_adjust, false, DEFAULT_CRT_SWITCH_PORCH_ADJUST, false);
+   SETTING_INT("crt_switch_vertical_adjust",     &settings->ints.crt_switch_vertical_adjust, false, DEFAULT_CRT_SWITCH_VERTICAL_ADJUST, false);
 #ifdef HAVE_WINDOW_OFFSET
    SETTING_INT("video_window_offset_x",          &settings->ints.video_window_offset_x, true, DEFAULT_WINDOW_OFFSET_X, false);
    SETTING_INT("video_window_offset_y",          &settings->ints.video_window_offset_y, true, DEFAULT_WINDOW_OFFSET_Y, false);
 #endif
+   SETTING_INT("video_max_frame_latency",        &settings->ints.video_max_frame_latency, true, DEFAULT_MAX_FRAME_LATENCY, false);
 
 #ifdef HAVE_D3D10
    SETTING_INT("d3d10_gpu_index",                &settings->ints.d3d10_gpu_index, true, DEFAULT_D3D10_GPU_INDEX, false);
@@ -2733,6 +2755,36 @@ static void video_driver_default_settings(global_t *global)
 
    global->console.screen.resolutions.current.id = 0;
 }
+
+/* Moves built-in playlists from legacy location to 'playlists/builtin' */
+#define CONFIG_PLAYLIST_MIGRATION(playlist_path, playlist_tag) \
+{ \
+   char new_file[PATH_MAX_LENGTH]; \
+   fill_pathname_resolve_relative( \
+         playlist_path, \
+         path_config, \
+         playlist_tag, \
+         sizeof(playlist_path)); \
+   fill_pathname_join_special( \
+         new_file, \
+         new_path, \
+         playlist_tag, \
+         sizeof(tmp_str)); \
+   if (path_is_valid(playlist_path)) \
+   { \
+      if (!filestream_copy(playlist_path, new_file)) \
+         RARCH_LOG("[Config]: Copied file \"%s\" to \"%s\".\n", playlist_path, new_file); \
+      if (path_is_valid(new_file) && !filestream_cmp(playlist_path, new_file)) \
+      { \
+         if (!filestream_delete(playlist_path)) \
+            RARCH_LOG("[Config]: Deleted file \"%s\".\n", playlist_path); \
+      } \
+      else \
+         new_file[0] = '\0'; \
+   } \
+   if (!string_is_empty(new_file)) \
+      strlcpy(playlist_path, new_file, sizeof(playlist_path)); \
+} \
 
 /**
  * config_set_defaults:
@@ -2909,6 +2961,9 @@ void config_set_defaults(void *data)
 #ifdef HAVE_XMB
    *settings->paths.path_menu_xmb_font            = '\0';
 #endif
+#ifdef HAVE_OZONE
+   *settings->paths.path_menu_ozone_font          = '\0';
+#endif
 
    configuration_set_string(settings,
          settings->arrays.discord_app_id,
@@ -2963,6 +3018,13 @@ void config_set_defaults(void *data)
 
    settings->uints.microphone_latency         = g_defaults.settings_in_latency;
 #endif
+
+   configuration_set_string(settings,
+         settings->arrays.midi_input,
+         DEFAULT_MIDI_INPUT);
+   configuration_set_string(settings,
+         settings->arrays.midi_output,
+         DEFAULT_MIDI_OUTPUT);
 
 #ifdef HAVE_LAKKA
    configuration_set_bool(settings,
@@ -3267,12 +3329,110 @@ void config_set_defaults(void *data)
       path_set(RARCH_PATH_CONFIG, temp_str);
    }
 
-   configuration_set_string(settings,
-         settings->arrays.midi_input,
-         DEFAULT_MIDI_INPUT);
-   configuration_set_string(settings,
-         settings->arrays.midi_output,
-         DEFAULT_MIDI_OUTPUT);
+   /* Built-in playlist default paths,
+    * needed when creating a new cfg from scratch */
+   {
+      char new_path[PATH_MAX_LENGTH];
+
+      fill_pathname_join_special(
+            new_path,
+            settings->paths.directory_playlist,
+            FILE_PATH_BUILTIN,
+            sizeof(new_path));
+
+      if (!path_is_directory(new_path))
+         path_mkdir(new_path);
+
+      if (string_is_empty(settings->paths.path_content_favorites))
+         strlcpy(settings->paths.directory_content_favorites, "default",
+               sizeof(settings->paths.directory_content_favorites));
+
+      if (     string_is_empty(settings->paths.directory_content_favorites)
+            || string_is_equal(settings->paths.directory_content_favorites, "default"))
+         fill_pathname_join_special(
+               settings->paths.path_content_favorites,
+               new_path,
+               FILE_PATH_CONTENT_FAVORITES,
+               sizeof(settings->paths.path_content_favorites));
+      else
+         fill_pathname_join_special(
+               settings->paths.path_content_favorites,
+               settings->paths.directory_content_favorites,
+               FILE_PATH_CONTENT_FAVORITES,
+               sizeof(settings->paths.path_content_favorites));
+
+      if (string_is_empty(settings->paths.path_content_history))
+         strlcpy(settings->paths.directory_content_history, "default",
+               sizeof(settings->paths.directory_content_history));
+
+      if (     string_is_empty(settings->paths.directory_content_history)
+            || string_is_equal(settings->paths.directory_content_history, "default"))
+         fill_pathname_join_special(
+               settings->paths.path_content_history,
+               new_path,
+               FILE_PATH_CONTENT_HISTORY,
+               sizeof(settings->paths.path_content_history));
+      else
+         fill_pathname_join_special(
+               settings->paths.path_content_history,
+               settings->paths.directory_content_history,
+               FILE_PATH_CONTENT_HISTORY,
+               sizeof(settings->paths.path_content_history));
+
+      if (string_is_empty(settings->paths.path_content_image_history))
+         strlcpy(settings->paths.directory_content_image_history, "default",
+               sizeof(settings->paths.directory_content_image_history));
+
+      if (     string_is_empty(settings->paths.directory_content_image_history)
+            || string_is_equal(settings->paths.directory_content_image_history, "default"))
+         fill_pathname_join_special(
+               settings->paths.path_content_image_history,
+               new_path,
+               FILE_PATH_CONTENT_IMAGE_HISTORY,
+               sizeof(settings->paths.path_content_image_history));
+      else
+         fill_pathname_join_special(
+               settings->paths.path_content_image_history,
+               settings->paths.directory_content_image_history,
+               FILE_PATH_CONTENT_IMAGE_HISTORY,
+               sizeof(settings->paths.path_content_image_history));
+
+      if (string_is_empty(settings->paths.path_content_music_history))
+         strlcpy(settings->paths.directory_content_music_history, "default",
+               sizeof(settings->paths.directory_content_music_history));
+
+      if (     string_is_empty(settings->paths.directory_content_music_history)
+            || string_is_equal(settings->paths.directory_content_music_history, "default"))
+         fill_pathname_join_special(
+               settings->paths.path_content_music_history,
+               new_path,
+               FILE_PATH_CONTENT_MUSIC_HISTORY,
+               sizeof(settings->paths.path_content_music_history));
+      else
+         fill_pathname_join_special(
+               settings->paths.path_content_music_history,
+               settings->paths.directory_content_music_history,
+               FILE_PATH_CONTENT_MUSIC_HISTORY,
+               sizeof(settings->paths.path_content_music_history));
+
+      if (string_is_empty(settings->paths.path_content_video_history))
+         strlcpy(settings->paths.directory_content_video_history, "default",
+               sizeof(settings->paths.directory_content_video_history));
+
+      if (     string_is_empty(settings->paths.directory_content_video_history)
+            || string_is_equal(settings->paths.directory_content_video_history, "default"))
+         fill_pathname_join_special(
+               settings->paths.path_content_video_history,
+               new_path,
+               FILE_PATH_CONTENT_VIDEO_HISTORY,
+               sizeof(settings->paths.path_content_video_history));
+      else
+         fill_pathname_join_special(
+               settings->paths.path_content_video_history,
+               settings->paths.directory_content_video_history,
+               FILE_PATH_CONTENT_VIDEO_HISTORY,
+               sizeof(settings->paths.path_content_video_history));
+   }
 
 #ifdef HAVE_CONFIGFILE
    /* Avoid reloading config on every content load */
@@ -3354,7 +3514,7 @@ static bool check_menu_driver_compatibility(settings_t *settings)
  *
  * Returns: handle to config file if found, otherwise NULL.
  **/
-static config_file_t *open_default_config_file(void)
+config_file_t *open_default_config_file(void)
 {
    char conf_path[PATH_MAX_LENGTH];
    config_file_t *conf                    = NULL;
@@ -3618,7 +3778,6 @@ static bool config_load_file(global_t *global,
    unsigned msg_color                              = 0;
    char *save                                      = NULL;
    char *override_username                         = NULL;
-   const char *path_config                         = NULL;
    runloop_state_t *runloop_st                     = runloop_state_get_ptr();
    int bool_settings_size                          = sizeof(settings->bools)  / sizeof(settings->bools.placeholder);
    int float_settings_size                         = sizeof(settings->floats) / sizeof(settings->floats.placeholder);
@@ -3994,97 +4153,105 @@ static bool config_load_file(global_t *global,
             settings->arrays.midi_output,
             DEFAULT_MIDI_OUTPUT);
 
-   path_config = path_get(RARCH_PATH_CONFIG);
+   /* Built-in playlist default legacy path migration */
+   {
+      const char *path_config = path_get(RARCH_PATH_CONFIG);
+      char new_path[PATH_MAX_LENGTH];
 
-   if (string_is_empty(settings->paths.path_content_favorites))
-      strlcpy(settings->paths.directory_content_favorites, "default",
-            sizeof(settings->paths.directory_content_favorites));
-
-   if (     string_is_empty(settings->paths.directory_content_favorites)
-         || string_is_equal(settings->paths.directory_content_favorites, "default"))
-      fill_pathname_resolve_relative(
-            settings->paths.path_content_favorites,
-            path_config,
-            FILE_PATH_CONTENT_FAVORITES,
-            sizeof(settings->paths.path_content_favorites));
-   else
       fill_pathname_join_special(
-            settings->paths.path_content_favorites,
-            settings->paths.directory_content_favorites,
-            FILE_PATH_CONTENT_FAVORITES,
-            sizeof(settings->paths.path_content_favorites));
+            new_path,
+            settings->paths.directory_playlist,
+            FILE_PATH_BUILTIN,
+            sizeof(new_path));
 
-   if (string_is_empty(settings->paths.path_content_history))
-      strlcpy(settings->paths.directory_content_history, "default",
-            sizeof(settings->paths.directory_content_history));
+      if (!path_is_directory(new_path))
+         path_mkdir(new_path);
 
-   if (     string_is_empty(settings->paths.directory_content_history)
-         || string_is_equal(settings->paths.directory_content_history, "default"))
-      fill_pathname_resolve_relative(
-            settings->paths.path_content_history,
-            path_config,
-            FILE_PATH_CONTENT_HISTORY,
-            sizeof(settings->paths.path_content_history));
-   else
-      fill_pathname_join_special(
-            settings->paths.path_content_history,
-            settings->paths.directory_content_history,
-            FILE_PATH_CONTENT_HISTORY,
-            sizeof(settings->paths.path_content_history));
+      if (string_is_empty(settings->paths.path_content_favorites))
+         strlcpy(settings->paths.directory_content_favorites, "default",
+               sizeof(settings->paths.directory_content_favorites));
 
-   if (string_is_empty(settings->paths.path_content_image_history))
-      strlcpy(settings->paths.directory_content_image_history, "default",
-            sizeof(settings->paths.directory_content_image_history));
+      if (     string_is_empty(settings->paths.directory_content_favorites)
+            || string_is_equal(settings->paths.directory_content_favorites, "default"))
+      {
+         CONFIG_PLAYLIST_MIGRATION(settings->paths.path_content_favorites,
+               FILE_PATH_CONTENT_FAVORITES);
+      }
+      else
+         fill_pathname_join_special(
+               settings->paths.path_content_favorites,
+               settings->paths.directory_content_favorites,
+               FILE_PATH_CONTENT_FAVORITES,
+               sizeof(settings->paths.path_content_favorites));
 
-   if (     string_is_empty(settings->paths.directory_content_image_history)
-         || string_is_equal(settings->paths.directory_content_image_history, "default"))
-      fill_pathname_resolve_relative(
-            settings->paths.path_content_image_history,
-            path_config,
-            FILE_PATH_CONTENT_IMAGE_HISTORY,
-            sizeof(settings->paths.path_content_image_history));
-   else
-      fill_pathname_join_special(
-            settings->paths.path_content_image_history,
-            settings->paths.directory_content_image_history,
-            FILE_PATH_CONTENT_IMAGE_HISTORY,
-            sizeof(settings->paths.path_content_image_history));
+      if (string_is_empty(settings->paths.path_content_history))
+         strlcpy(settings->paths.directory_content_history, "default",
+               sizeof(settings->paths.directory_content_history));
 
-   if (string_is_empty(settings->paths.path_content_music_history))
-      strlcpy(settings->paths.directory_content_music_history, "default",
-            sizeof(settings->paths.directory_content_music_history));
+      if (     string_is_empty(settings->paths.directory_content_history)
+            || string_is_equal(settings->paths.directory_content_history, "default"))
+      {
+         CONFIG_PLAYLIST_MIGRATION(settings->paths.path_content_history,
+               FILE_PATH_CONTENT_HISTORY);
+      }
+      else
+         fill_pathname_join_special(
+               settings->paths.path_content_history,
+               settings->paths.directory_content_history,
+               FILE_PATH_CONTENT_HISTORY,
+               sizeof(settings->paths.path_content_history));
 
-   if (     string_is_empty(settings->paths.directory_content_music_history)
-         || string_is_equal(settings->paths.directory_content_music_history, "default"))
-      fill_pathname_resolve_relative(
-            settings->paths.path_content_music_history,
-            path_config,
-            FILE_PATH_CONTENT_MUSIC_HISTORY,
-            sizeof(settings->paths.path_content_music_history));
-   else
-      fill_pathname_join_special(
-            settings->paths.path_content_music_history,
-            settings->paths.directory_content_music_history,
-            FILE_PATH_CONTENT_MUSIC_HISTORY,
-            sizeof(settings->paths.path_content_music_history));
+      if (string_is_empty(settings->paths.path_content_image_history))
+         strlcpy(settings->paths.directory_content_image_history, "default",
+               sizeof(settings->paths.directory_content_image_history));
 
-   if (string_is_empty(settings->paths.path_content_video_history))
-      strlcpy(settings->paths.directory_content_video_history, "default",
-            sizeof(settings->paths.directory_content_video_history));
+      if (     string_is_empty(settings->paths.directory_content_image_history)
+            || string_is_equal(settings->paths.directory_content_image_history, "default"))
+      {
+         CONFIG_PLAYLIST_MIGRATION(settings->paths.path_content_image_history,
+               FILE_PATH_CONTENT_IMAGE_HISTORY);
+      }
+      else
+         fill_pathname_join_special(
+               settings->paths.path_content_image_history,
+               settings->paths.directory_content_image_history,
+               FILE_PATH_CONTENT_IMAGE_HISTORY,
+               sizeof(settings->paths.path_content_image_history));
 
-   if (     string_is_empty(settings->paths.directory_content_video_history)
-         || string_is_equal(settings->paths.directory_content_video_history, "default"))
-      fill_pathname_resolve_relative(
-            settings->paths.path_content_video_history,
-            path_config,
-            FILE_PATH_CONTENT_VIDEO_HISTORY,
-            sizeof(settings->paths.path_content_video_history));
-   else
-      fill_pathname_join_special(
-            settings->paths.path_content_video_history,
-            settings->paths.directory_content_video_history,
-            FILE_PATH_CONTENT_VIDEO_HISTORY,
-            sizeof(settings->paths.path_content_video_history));
+      if (string_is_empty(settings->paths.path_content_music_history))
+         strlcpy(settings->paths.directory_content_music_history, "default",
+               sizeof(settings->paths.directory_content_music_history));
+
+      if (     string_is_empty(settings->paths.directory_content_music_history)
+            || string_is_equal(settings->paths.directory_content_music_history, "default"))
+      {
+         CONFIG_PLAYLIST_MIGRATION(settings->paths.path_content_music_history,
+               FILE_PATH_CONTENT_MUSIC_HISTORY);
+      }
+      else
+         fill_pathname_join_special(
+               settings->paths.path_content_music_history,
+               settings->paths.directory_content_music_history,
+               FILE_PATH_CONTENT_MUSIC_HISTORY,
+               sizeof(settings->paths.path_content_music_history));
+
+      if (string_is_empty(settings->paths.path_content_video_history))
+         strlcpy(settings->paths.directory_content_video_history, "default",
+               sizeof(settings->paths.directory_content_video_history));
+
+      if (     string_is_empty(settings->paths.directory_content_video_history)
+            || string_is_equal(settings->paths.directory_content_video_history, "default"))
+      {
+         CONFIG_PLAYLIST_MIGRATION(settings->paths.path_content_video_history,
+               FILE_PATH_CONTENT_VIDEO_HISTORY);
+      }
+      else
+         fill_pathname_join_special(
+               settings->paths.path_content_video_history,
+               settings->paths.directory_content_video_history,
+               FILE_PATH_CONTENT_VIDEO_HISTORY,
+               sizeof(settings->paths.path_content_video_history));
+   }
 
    if (!string_is_empty(settings->paths.directory_screenshot))
    {
@@ -4636,11 +4803,11 @@ bool config_load_override_file(const char *config_path)
  */
 bool config_unload_override(void)
 {
-   settings_t *settings = config_st;
-   bool fullscreen_prev = settings->bools.video_fullscreen;
-   uint32_t flags       = runloop_get_flags();
+   settings_t *settings        = config_st;
+   runloop_state_t *runloop_st = runloop_state_get_ptr();
+   bool fullscreen_prev        = settings->bools.video_fullscreen;
 
-   runloop_state_get_ptr()->flags &= ~RUNLOOP_FLAG_OVERRIDES_ACTIVE;
+   runloop_st->flags &= ~RUNLOOP_FLAG_OVERRIDES_ACTIVE;
    path_clear(RARCH_PATH_CONFIG_OVERRIDE);
 
    /* Toggle has_save_path to false so it resets */
@@ -4661,9 +4828,13 @@ bool config_unload_override(void)
             && !settings->bools.video_fullscreen)
          settings->flags |= SETTINGS_FLG_SKIP_WINDOW_POSITIONS;
 
-      if (flags & RUNLOOP_FLAG_CORE_RUNNING)
+      if (runloop_st->flags & RUNLOOP_FLAG_CORE_RUNNING)
          command_event(CMD_EVENT_REINIT, NULL);
    }
+
+   /* Turbo fire settings must be reloaded from remap */
+   if (settings->bools.auto_remaps_enable)
+      config_load_remap(settings->paths.directory_input_remapping, &runloop_st->system);
 
    RARCH_LOG("[Overrides]: Configuration overrides unloaded, original configuration restored.\n");
 
@@ -5337,6 +5508,9 @@ bool config_save_file(const char *path)
    config_set_path(conf, "xmb_font",
          !string_is_empty(settings->paths.path_menu_xmb_font)
          ? settings->paths.path_menu_xmb_font : "");
+   config_set_path(conf, "ozone_font",
+         !string_is_empty(settings->paths.path_menu_ozone_font)
+         ? settings->paths.path_menu_ozone_font : "");
 #endif
 
    /* String settings  */
@@ -5625,8 +5799,12 @@ int8_t config_save_overrides(enum override_type type,
 
    if (conf)
    {
+      /* Turbo fire settings are saved to remaps and therefore skipped from overrides */
       for (i = 0; i < (unsigned)bool_settings_size; i++)
       {
+         if (string_starts_with(bool_settings[i].ident, "input_turbo"))
+            continue;
+
          if ((*bool_settings[i].ptr) != (*bool_overrides[i].ptr))
          {
             config_set_string(conf, bool_overrides[i].ident,
@@ -5638,6 +5816,9 @@ int8_t config_save_overrides(enum override_type type,
       }
       for (i = 0; i < (unsigned)int_settings_size; i++)
       {
+         if (string_starts_with(int_settings[i].ident, "input_turbo"))
+            continue;
+
          if ((*int_settings[i].ptr) != (*int_overrides[i].ptr))
          {
             config_set_int(conf, int_overrides[i].ident,
@@ -5648,6 +5829,9 @@ int8_t config_save_overrides(enum override_type type,
       }
       for (i = 0; i < (unsigned)uint_settings_size; i++)
       {
+         if (string_starts_with(uint_settings[i].ident, "input_turbo"))
+            continue;
+
          if ((*uint_settings[i].ptr) != (*uint_overrides[i].ptr))
          {
             config_set_int(conf, uint_overrides[i].ident,
@@ -6068,29 +6252,16 @@ bool input_remapping_load_file(void *data, const char *path)
       _len = strlcpy(s1, "input_remap_port_p", sizeof(s1));
       strlcpy(s1 + _len, formatted_number, sizeof(s1) - _len);
       CONFIG_GET_INT_BASE(conf, settings, uints.input_remap_ports[i], s1);
-
-      /* Turbo fire settings */
-      _len = strlcpy(s1, "input_turbo_enable", sizeof(s1));
-      CONFIG_GET_BOOL_BASE(conf, settings, bools.input_turbo_enable, s1);
-
-      _len = strlcpy(s1, "input_turbo_allow_dpad", sizeof(s1));
-      CONFIG_GET_BOOL_BASE(conf, settings, bools.input_turbo_allow_dpad, s1);
-
-      _len = strlcpy(s1, "input_turbo_mode", sizeof(s1));
-      CONFIG_GET_INT_BASE(conf, settings, uints.input_turbo_mode, s1);
-
-      _len = strlcpy(s1, "input_turbo_bind", sizeof(s1));
-      CONFIG_GET_INT_BASE(conf, settings, ints.input_turbo_bind, s1);
-
-      _len = strlcpy(s1, "input_turbo_button", sizeof(s1));
-      CONFIG_GET_INT_BASE(conf, settings, uints.input_turbo_button, s1);
-
-      _len = strlcpy(s1, "input_turbo_period", sizeof(s1));
-      CONFIG_GET_INT_BASE(conf, settings, uints.input_turbo_period, s1);
-
-      _len = strlcpy(s1, "input_turbo_duty_cycle", sizeof(s1));
-      CONFIG_GET_INT_BASE(conf, settings, uints.input_turbo_duty_cycle, s1);
    }
+
+   /* Turbo fire settings */
+   CONFIG_GET_BOOL_BASE(conf, settings, bools.input_turbo_enable, "input_turbo_enable");
+   CONFIG_GET_BOOL_BASE(conf, settings, bools.input_turbo_allow_dpad, "input_turbo_allow_dpad");
+   CONFIG_GET_INT_BASE(conf, settings, uints.input_turbo_mode, "input_turbo_mode");
+   CONFIG_GET_INT_BASE(conf, settings, ints.input_turbo_bind, "input_turbo_bind");
+   CONFIG_GET_INT_BASE(conf, settings, uints.input_turbo_button, "input_turbo_button");
+   CONFIG_GET_INT_BASE(conf, settings, uints.input_turbo_period, "input_turbo_period");
+   CONFIG_GET_INT_BASE(conf, settings, uints.input_turbo_duty_cycle, "input_turbo_duty_cycle");
 
    input_remapping_update_port_map();
 
@@ -6279,29 +6450,16 @@ bool input_remapping_save_file(const char *path)
       _len = strlcpy(s1, "input_remap_port_p", sizeof(s1));
       strlcpy(s1 + _len, formatted_number, sizeof(s1) - _len);
       config_set_int(conf, s1, settings->uints.input_remap_ports[i]);
-
-      /* Turbo fire settings */
-      _len = strlcpy(s1, "input_turbo_enable", sizeof(s1));
-      config_set_string(conf, s1, settings->bools.input_turbo_enable ? "true" : "false");
-
-      _len = strlcpy(s1, "input_turbo_allow_dpad", sizeof(s1));
-      config_set_string(conf, s1, settings->bools.input_turbo_allow_dpad ? "true" : "false");
-
-      _len = strlcpy(s1, "input_turbo_mode", sizeof(s1));
-      config_set_int(conf, s1, settings->uints.input_turbo_mode);
-
-      _len = strlcpy(s1, "input_turbo_bind", sizeof(s1));
-      config_set_int(conf, s1, settings->ints.input_turbo_bind);
-
-      _len = strlcpy(s1, "input_turbo_button", sizeof(s1));
-      config_set_int(conf, s1, settings->uints.input_turbo_button);
-
-      _len = strlcpy(s1, "input_turbo_period", sizeof(s1));
-      config_set_int(conf, s1, settings->uints.input_turbo_period);
-
-      _len = strlcpy(s1, "input_turbo_duty_cycle", sizeof(s1));
-      config_set_int(conf, s1, settings->uints.input_turbo_duty_cycle);
    }
+
+   /* Turbo fire settings */
+   config_set_string(conf, "input_turbo_enable", settings->bools.input_turbo_enable ? "true" : "false");
+   config_set_string(conf, "input_turbo_allow_dpad", settings->bools.input_turbo_allow_dpad ? "true" : "false");
+   config_set_int(conf, "input_turbo_mode", settings->uints.input_turbo_mode);
+   config_set_int(conf, "input_turbo_bind", settings->ints.input_turbo_bind);
+   config_set_int(conf, "input_turbo_button", settings->uints.input_turbo_button);
+   config_set_int(conf, "input_turbo_period", settings->uints.input_turbo_period);
+   config_set_int(conf, "input_turbo_duty_cycle", settings->uints.input_turbo_duty_cycle);
 
    ret = config_file_write(conf, path, true);
    config_file_free(conf);

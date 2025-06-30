@@ -43,11 +43,6 @@ static id<CHHapticPatternPlayer> deviceWeakPlayer IPHONE_RUMBLE_AVAIL;
 static id<CHHapticPatternPlayer> deviceStrongPlayer IPHONE_RUMBLE_AVAIL;
 #endif
 
-enum
-{
-    GCCONTROLLER_PLAYER_INDEX_UNSET = -1,
-};
-
 @class MFIRumbleController;
 
 /* TODO/FIXME - static globals */
@@ -356,14 +351,6 @@ static void mfi_joypad_autodetect_add(unsigned autoconf_pad, const char *display
     [self.engines addObject:engine];
 
     __weak MFIRumbleController *weakSelf = self;
-    engine.stoppedHandler = ^(CHHapticEngineStoppedReason stoppedReason)
-    {
-        MFIRumbleController *strongSelf = weakSelf;
-        if (!strongSelf)
-            return;
-
-        [strongSelf shutdown];
-    };
     engine.resetHandler = ^{
         MFIRumbleController *strongSelf = weakSelf;
         if (!strongSelf)
@@ -416,9 +403,13 @@ static void mfi_joypad_autodetect_add(unsigned autoconf_pad, const char *display
 {
     if (@available(iOS 14, tvOS 14, macOS 11, *))
     {
-        _weakPlayer   = nil;
-        _strongPlayer = nil;
+        for (CHHapticEngine *eng in self.engines)
+            eng.resetHandler = ^{};
         [self.engines removeAllObjects];
+        if (_weakPlayer) [_weakPlayer cancelAndReturnError:nil];
+        _weakPlayer   = nil;
+        if (_strongPlayer) [_strongPlayer cancelAndReturnError:nil];
+        _strongPlayer = nil;
     }
 }
 
@@ -514,17 +505,19 @@ static void apple_gamecontroller_joypad_connect(GCController *controller)
 
 static void apple_gamecontroller_joypad_disconnect(GCController* controller)
 {
-    signed pad = (int32_t)controller.playerIndex;
+    NSInteger pad = controller.playerIndex;
 
-    if (pad == GCCONTROLLER_PLAYER_INDEX_UNSET)
+    if (pad < 0 || pad >= MAX_MFI_CONTROLLERS)
         return;
 
+    if (mfi_rumblers[pad])
+        [mfi_rumblers[pad] shutdown];
     mfi_rumblers[pad]    = nil;
     mfi_controllers[pad] = 0;
     if ([mfiControllers containsObject:controller])
     {
         [mfiControllers removeObject:controller];
-        input_autoconfigure_disconnect(pad, mfi_joypad.ident);
+        input_autoconfigure_disconnect((unsigned)pad, mfi_joypad.ident);
     }
 }
 

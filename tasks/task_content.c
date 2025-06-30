@@ -1490,8 +1490,8 @@ static bool content_load(content_ctx_info_t *info,
 #endif
 #endif
 
-   command_event(CMD_EVENT_HISTORY_INIT, NULL);
    retroarch_favorites_init();
+   command_event(CMD_EVENT_HISTORY_INIT, NULL);
    command_event(CMD_EVENT_RESUME, NULL);
    command_event(CMD_EVENT_VIDEO_SET_ASPECT_RATIO, NULL);
 
@@ -2114,6 +2114,7 @@ bool task_push_load_content_from_playlist_from_menu(
     * > Forget manually loaded core */
    path_set(RARCH_PATH_CORE, core_path);
    path_clear(RARCH_PATH_CORE_LAST);
+
 #ifdef HAVE_DYNAMIC
    command_event(CMD_EVENT_LOAD_CORE, NULL);
 #else
