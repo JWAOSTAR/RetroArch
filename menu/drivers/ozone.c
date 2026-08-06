@@ -889,6 +889,9 @@ static const float ozone_sidebar_gradient_bottom_solarized_light[16]        = {
 static const float ozone_sidebar_background_gray_dark[16]                   =
    COLOR_HEX_TO_FLOAT(0x101010, 0.0f);
 
+static const float ozone_sidebar_background_red_dark[16]                   =
+   COLOR_HEX_TO_FLOAT(0x222020, 0.0f);
+
 static const float ozone_sidebar_background_gray_light[16]                  =
    COLOR_HEX_TO_FLOAT(0x202020, 0.0f);
 
@@ -1566,7 +1569,7 @@ static ozone_theme_t ozone_theme_gray_dark = {
 
 static ozone_theme_t ozone_theme_red_dark = {
    /* Background color */
-   COLOR_HEX_TO_FLOAT(0x101010, 1.0f),                   /* background */
+   COLOR_HEX_TO_FLOAT(0x222020, 1.0f),                   /* background */
    ozone_background_libretro_running_gray_light,          /* background_libretro_running */
 
    /* Float colors for quads and icons */
@@ -1580,8 +1583,8 @@ static ozone_theme_t ozone_theme_red_dark = {
    COLOR_HEX_TO_FLOAT(0x202020, 1.0f),                   /* message_background */
 
    /* RGBA colors for text */
-   0xFF0000FF,                                           /* text_rgba */
-   0x808080FF,                                           /* text_sidebar_rgba */
+   0xFFFFFFFF,                                           /* text_rgba */
+   0xFF0000FF,                                           /* text_sidebar_rgba */
    0xFFFFFFFF,                                           /* text_selected_rgba */
    0x870000FF,                                           /* text_sublabel_rgba */
 
@@ -1589,9 +1592,9 @@ static ozone_theme_t ozone_theme_red_dark = {
    0xFFFFFF,                                             /* screensaver_tint */
 
    /* Sidebar color */
-   ozone_sidebar_background_gray_dark,                   /* sidebar_background */
-   ozone_sidebar_background_gray_dark,                   /* sidebar_top_gradient */
-   ozone_sidebar_background_gray_dark,                   /* sidebar_bottom_gradient */
+   ozone_sidebar_background_red_dark,                   /* sidebar_background */
+   ozone_sidebar_background_red_dark,                   /* sidebar_top_gradient */
+   ozone_sidebar_background_red_dark,                   /* sidebar_bottom_gradient */
 
    /* Fancy cursor colors */
    ozone_border_red,                                    /* cursor_border_0 */
