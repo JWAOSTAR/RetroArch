@@ -464,6 +464,122 @@ static bool gl3_parse_version(const char *version,
    return true;
 }
 
+#if !defined(HAVE_OPENGLES3) && !defined(HAVE_OPENGLES)
+/* Kept local rather than added to the shared glsym headers: some of these
+ * tokens double as feature tests on GLES class targets, where defining them
+ * unconditionally would switch on desktop only entry points. */
+#ifndef GL_NUM_SHADER_BINARY_FORMATS
+#define GL_NUM_SHADER_BINARY_FORMATS 0x8DF9
+#endif
+#ifndef GL_SHADER_BINARY_FORMATS
+#define GL_SHADER_BINARY_FORMATS 0x8DF8
+#endif
+#ifndef GL_SHADER_BINARY_FORMAT_SPIR_V_ARB
+#define GL_SHADER_BINARY_FORMAT_SPIR_V_ARB 0x9551
+#endif
+#ifndef GL_NUM_EXTENSIONS
+#define GL_NUM_EXTENSIONS 0x821D
+#endif
+#endif
+
+/**
+ * gl3_spirv_binary_supported:
+ *
+ * Reports whether SPIR-V modules can be handed straight to the driver via
+ * GL_ARB_gl_spirv, letting the slang filter chain skip cross compilation to
+ * GLSL entirely. Desktop GL only; the extension is explicitly not written
+ * for OpenGL ES.
+ *
+ * The result is latched, so this is cheap to call per shader stage. It is
+ * only ever consulted while a context is current.
+ *
+ * Returns: true if glShaderBinary/glSpecializeShader can consume SPIR-V.
+ */
+bool gl3_spirv_binary_supported(void)
+{
+#if defined(HAVE_OPENGLES3) || defined(HAVE_OPENGLES)
+   return false;
+#else
+   static int supported = -1;
+   settings_t *settings = config_get_ptr();
+   GLint num_formats    = 0;
+   GLint num_extensions = 0;
+   GLint i;
+   unsigned major       = 0;
+   unsigned minor       = 0;
+   bool have_extension  = false;
+
+   /* Checked on every call rather than latched with the capability, so
+    * toggling the menu entry takes effect on the next preset load. */
+   if (!settings || !settings->bools.video_gl_direct_spirv)
+      return false;
+
+   if (supported >= 0)
+      return supported > 0;
+
+   supported = 0;
+
+   /* A kill switch, for bisecting driver specific breakage without
+    * having to rebuild. */
+   if (getenv("RETROARCH_GL3_DISABLE_SPIRV"))
+   {
+      RARCH_LOG("[GLCore] SPIR-V shader ingestion disabled by environment.\n");
+      return false;
+   }
+
+   if (!glShaderBinary || !(glSpecializeShader || glSpecializeShaderARB))
+      return false;
+
+   /* Core since 4.6, otherwise the extension must be advertised. */
+   if (gl3_parse_version((const char*)glGetString(GL_VERSION), &major, &minor))
+      have_extension = (major > 4) || (major == 4 && minor >= 6);
+
+   if (!have_extension)
+   {
+      glGetIntegerv(GL_NUM_EXTENSIONS, &num_extensions);
+      for (i = 0; i < num_extensions; i++)
+      {
+         const char *ext = (const char*)glGetStringi(GL_EXTENSIONS, i);
+         if (ext && string_is_equal(ext, "GL_ARB_gl_spirv"))
+         {
+            have_extension = true;
+            break;
+         }
+      }
+   }
+
+   if (!have_extension)
+      return false;
+
+   /* Advertising the extension is not quite enough: the binary format has
+    * to actually be accepted by ShaderBinary. */
+   glGetIntegerv(GL_NUM_SHADER_BINARY_FORMATS, &num_formats);
+   if (num_formats > 0)
+   {
+      GLint *formats = (GLint*)calloc((size_t)num_formats, sizeof(GLint));
+
+      if (formats)
+      {
+         glGetIntegerv(GL_SHADER_BINARY_FORMATS, formats);
+         for (i = 0; i < num_formats; i++)
+         {
+            if (formats[i] == GL_SHADER_BINARY_FORMAT_SPIR_V_ARB)
+            {
+               supported = 1;
+               break;
+            }
+         }
+         free(formats);
+      }
+   }
+
+   RARCH_LOG("[GLCore] GL_ARB_gl_spirv: %s.\n",
+         supported ? "available" : "unavailable");
+
+   return supported > 0;
+#endif
+}
+
 uint32_t gl3_get_cross_compiler_target_version(void)
 {
    const char *version = (const char*)glGetString(GL_VERSION);
@@ -876,22 +992,6 @@ static void gfx_display_gl3_scissor_end(
    glDisable(GL_SCISSOR_TEST);
 }
 
-gfx_display_ctx_driver_t gfx_display_ctx_gl3 = {
-   gfx_display_gl3_draw,
-   gfx_display_gl3_draw_pipeline,
-   gfx_display_gl3_blend_begin,
-   gfx_display_gl3_blend_end,
-   gfx_display_gl3_get_default_mvp,
-   gfx_display_gl3_get_default_vertices,
-   gfx_display_gl3_get_default_tex_coords,
-   FONT_DRIVER_RENDER_OPENGL_CORE_API,
-   GFX_VIDEO_DRIVER_OPENGL_CORE,
-   "glcore",
-   false,
-   gfx_display_gl3_scissor_begin,
-   gfx_display_gl3_scissor_end
-};
-
 /**
  * FONT DRIVER
  */
@@ -996,7 +1096,7 @@ static void *gl3_raster_font_init(void *data,
 
    if (!font_renderer_create_default(
             &font->font_driver,
-            &font->font_data, font_path, font_size))
+            &font->font_data, font_path, font_size, FONT_ATLAS_FORMAT_A8))
    {
       free(font);
       return NULL;
@@ -1456,18 +1556,6 @@ static bool gl3_raster_font_get_line_metrics(void* data, struct font_line_metric
    }
    return false;
 }
-
-font_renderer_t gl3_raster_font = {
-   gl3_raster_font_init,
-   gl3_raster_font_free,
-   gl3_raster_font_render_msg,
-   "glcore",
-   gl3_raster_font_get_glyph,
-   gl3_raster_font_bind_block,
-   gl3_raster_font_flush_block,
-   gl3_raster_font_get_message_width,
-   gl3_raster_font_get_line_metrics
-};
 
 /**
  * VIDEO DRIVER
@@ -3190,11 +3278,6 @@ static void *gl3_init(const video_info_t *video,
       goto error;
    }
 
-      font_driver_init_osd(gl,
-            video,
-            false,
-            video->is_threaded,
-            FONT_DRIVER_RENDER_OPENGL_CORE_API);
 
    if (video_gpu_record
       && recording_state_get_ptr()->enable)
@@ -3424,7 +3507,6 @@ static void gl3_free(void *data)
 
    if (gl->flags & GL3_FLAG_USE_SHARED_CONTEXT)
       gl->ctx_driver->bind_hw_render(gl->ctx_data, false);
-   font_driver_free_osd();
    gl3_destroy_resources(gl);
    if (gl->ctx_driver && gl->ctx_driver->destroy)
       gl->ctx_driver->destroy(gl->ctx_data);
@@ -4891,13 +4973,7 @@ static bool gl3_frame(void *data, const void *frame,
 #endif
 
    if (msg && *msg)
-   {
-#if 0
-      if (msg_bgcolor_enable)
-         gl3_render_osd_background(gl, video_info, msg);
-#endif
       font_driver_render_msg(gl, msg, strlen(msg), NULL, NULL);
-   }
 
    /* scRGB output: everything above rendered into the SDR offscreen;
     * encode it into the FP16 backbuffer in one pass (gamma 2.4
@@ -5681,6 +5757,18 @@ static bool gl3_focus(void *data)
    return true;
 }
 
+static font_renderer_t gl3_raster_font = {
+   gl3_raster_font_init,
+   gl3_raster_font_free,
+   gl3_raster_font_render_msg,
+   "glcore",
+   gl3_raster_font_get_glyph,
+   gl3_raster_font_bind_block,
+   gl3_raster_font_flush_block,
+   gl3_raster_font_get_message_width,
+   gl3_raster_font_get_line_metrics
+};
+
 video_driver_t video_gl3 = {
    gl3_init,
    gl3_frame,
@@ -5717,5 +5805,22 @@ video_driver_t video_gl3 = {
    gl3_gfx_widgets_enabled,
 #endif
    NULL, /* invalidate_hw_render_cache */
-   gl3_read_viewport_hdr
+   gl3_read_viewport_hdr,
+   &gl3_raster_font
+};
+
+gfx_display_ctx_driver_t gfx_display_ctx_gl3 = {
+   gfx_display_gl3_draw,
+   gfx_display_gl3_draw_pipeline,
+   gfx_display_gl3_blend_begin,
+   gfx_display_gl3_blend_end,
+   gfx_display_gl3_get_default_mvp,
+   gfx_display_gl3_get_default_vertices,
+   gfx_display_gl3_get_default_tex_coords,
+   &gl3_raster_font,
+   GFX_VIDEO_DRIVER_OPENGL_CORE,
+   "glcore",
+   false,
+   gfx_display_gl3_scissor_begin,
+   gfx_display_gl3_scissor_end
 };

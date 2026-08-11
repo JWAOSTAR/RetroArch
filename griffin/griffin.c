@@ -412,6 +412,12 @@ VIDEO SHADERS
 #include "../gfx/drivers_shader/glslang_util.c"
 #endif
 
+/* Must mirror the guard on shader_gl3.cpp in griffin_cpp.cpp exactly:
+ * that is the only consumer of spirv_opengl_lower(). */
+#if defined(HAVE_OPENGL_CORE) && defined(HAVE_SLANG)
+#include "../gfx/drivers_shader/spirv_opengl.c"
+#endif
+
 #ifdef HAVE_CG
 #ifdef HAVE_OPENGL
 #include "../gfx/drivers_shader/shader_gl_cg.c"
@@ -492,6 +498,11 @@ VIDEO IMAGE
 
 #ifdef HAVE_RVP9
 #include "../libretro-common/formats/vp9/rvp9.c"
+#endif
+
+#ifdef HAVE_RMPEG1
+#include "../libretro-common/formats/mpeg1/rmpeg1_ps.c"
+#include "../libretro-common/formats/mpeg1/rmpeg1_video.c"
 #endif
 #if defined(HAVE_RVP9) || defined(HAVE_RMP4)
 /* Shared 10-bit / HDR I420->RGB blits: used by the webm/mp4 rvp9 paths
@@ -654,18 +665,14 @@ VIDEO DRIVER
 FONTS
 ============================================================ */
 
-#include "../gfx/drivers_font_renderer/bitmapfont.c"
+#include "../gfx/bitmapfont.c"
 
 #ifdef HAVE_LANGEXTRA
-#include "../gfx/drivers_font_renderer/bitmapfont_10x10.c"
-#include "../gfx/drivers_font_renderer/bitmapfont_6x10.c"
 #endif
 
 #include "../gfx/font_driver.c"
 
-#if defined(HAVE_STB_FONT)
 #include "../gfx/drivers_font_renderer/stb.c"
-#endif
 
 #if defined(HAVE_FREETYPE)
 #include "../gfx/drivers_font_renderer/freetype.c"
@@ -976,6 +983,12 @@ AUDIO
 #include "../input/drivers/sdl3_input.c"
 #include "../gfx/drivers/sdl3_gfx.c"
 #include "../gfx/common/sdl3_common.c"
+#if defined(HAVE_OPENGL) || defined(HAVE_OPENGL1) || defined(HAVE_OPENGL_CORE) || defined(HAVE_OPENGLES)
+#include "../gfx/drivers_context/sdl3_gl_ctx.c"
+#endif
+#if defined(HAVE_VULKAN)
+#include "../gfx/drivers_context/sdl3_vk_ctx.c"
+#endif
 #elif defined(HAVE_SDL2)
 #include "../audio/drivers/sdl_audio.c"
 #include "../input/drivers/sdl_input.c"
@@ -1180,6 +1193,7 @@ FILE
 #ifndef __WINRT__
 #include "../libretro-common/vfs/vfs_implementation.c"
 #endif
+#include "../libretro-common/vfs/vfs_hybrid.c"
 
 #ifdef HAVE_CDROM
 #include "../libretro-common/cdrom/cdrom.c"
@@ -1480,6 +1494,7 @@ MENU
 #endif
 
 #ifdef HAVE_RGUI
+#include "../menu/drivers/rgui_bitmapfont.c"
 #include "../menu/drivers/rgui.c"
 #endif
 

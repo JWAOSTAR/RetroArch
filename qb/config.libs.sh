@@ -404,9 +404,14 @@ check_val '' SDL2 -lSDL2 SDL2 sdl2 2.0.0 '' true
 check_val '' SDL3 -lSDL3 SDL3 sdl3 3.2.20 '' true
 
 if [ "$HAVE_SDL3" = 'yes' ] && { [ "$HAVE_SDL2" = 'yes' ] || [ "$HAVE_SDL" = 'yes' ]; }; then
-   die : 'Notice: SDL drivers will be replaced by SDL3 ones.'
-   HAVE_SDL=no
-   HAVE_SDL2=no
+   if [ "$USER_SDL2" = 'yes' ] && [ "$USER_SDL3" != 'yes' ]; then
+      die : 'Notice: SDL2 was explicitly enabled, disabling SDL3 drivers.'
+      HAVE_SDL3=no
+   else
+      die : 'Notice: SDL drivers will be replaced by SDL3 ones.'
+      HAVE_SDL=no
+      HAVE_SDL2=no
+   fi
 fi
 if [ "$HAVE_SDL2" = 'yes' ] && [ "$HAVE_SDL" = 'yes' ]; then
    die : 'Notice: SDL drivers will be replaced by SDL2 ones.'
@@ -906,6 +911,23 @@ fi
 # First try system libsmb2
 check_pkgconf SMBCLIENT libsmb2 0.0
 check_enabled NETWORKING SMBCLIENT libsmb2 'SMB client support is' false
+
+# --enable-libsmb is the umbrella switch for SMB support: it guarantees SMB
+# gets built in without the caller having to know which libsmb2 provider is
+# available.  A system libsmb2 is preferred when pkg-config found one, and
+# the copy bundled in deps/libsmb2 is used otherwise.  --enable-smbclient and
+# --enable-builtinsmbclient remain available for packagers who need to pin a
+# specific provider.
+if [ "$HAVE_LIBSMB" = 'yes' ]; then
+   check_enabled NETWORKING LIBSMB libsmb2 'Networking is' false
+fi
+
+if [ "$HAVE_LIBSMB" = 'yes' ] && [ "$HAVE_SMBCLIENT" != 'yes' ]; then
+   if [ "$USER_BUILTINSMBCLIENT" = 'no' ]; then
+      die 1 'Error: --enable-libsmb requires a libsmb2, but no system libsmb2 was found and the bundled one is disabled.'
+   fi
+   HAVE_BUILTINSMBCLIENT=yes
+fi
 
 if [ "$HAVE_SMBCLIENT" = "yes" ]; then
     echo "SMB support enabled (system libsmb2)"

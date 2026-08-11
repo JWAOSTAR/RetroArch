@@ -289,7 +289,8 @@ OBJ += \
        $(LIBRETRO_COMM_DIR)/streams/interface_stream.o \
        $(LIBRETRO_COMM_DIR)/streams/memory_stream.o \
        $(LIBRETRO_COMM_DIR)/streams/network_stream.o \
-       $(LIBRETRO_COMM_DIR)/vfs/vfs_implementation.o
+       $(LIBRETRO_COMM_DIR)/vfs/vfs_implementation.o \
+       $(LIBRETRO_COMM_DIR)/vfs/vfs_hybrid.o
 
 ifeq ($(ANDROID), 1)
    OBJ += $(LIBRETRO_COMM_DIR)/vfs/vfs_implementation_saf.o
@@ -334,9 +335,7 @@ OBJ     += state_manager.o
 endif
 
 OBJ += \
-       gfx/drivers_font_renderer/bitmapfont.o \
-       gfx/drivers_font_renderer/bitmapfont_10x10.o \
-       gfx/drivers_font_renderer/bitmapfont_6x10.o \
+       gfx/bitmapfont.o \
        tasks/task_autodetect.o \
        input/input_autodetect_builtin.o \
        input/input_keymaps.o \
@@ -1036,7 +1035,8 @@ ifeq ($(HAVE_MENU), 1)
    endif
 
    ifeq ($(HAVE_RGUI), 1)
-      OBJ += menu/drivers/rgui.o
+      OBJ += menu/drivers/rgui.o \
+             menu/drivers/rgui_bitmapfont.o
       DEFINES += -DHAVE_RGUI
    endif
 
@@ -1157,10 +1157,7 @@ ifeq ($(HAVE_OVERLAY), 1)
           led/drivers/led_overlay.o
 endif
 
-ifeq ($(HAVE_STB_FONT), 1)
-   OBJ += gfx/drivers_font_renderer/stb.o
-   DEFINES += -DHAVE_STB_FONT
-endif
+OBJ += gfx/drivers_font_renderer/stb.o
 
 ifeq ($(HAVE_FREETYPE), 1)
    OBJ += gfx/drivers_font_renderer/freetype.o
@@ -1675,6 +1672,14 @@ ifeq ($(HAVE_SDL3), 1)
           input/drivers/sdl3_input.o \
           gfx/drivers/sdl3_gfx.o \
           gfx/common/sdl3_common.o
+
+   ifneq ($(filter 1,$(HAVE_OPENGL) $(HAVE_OPENGL1) $(HAVE_OPENGL_CORE) $(HAVE_OPENGLES)),)
+      OBJ += gfx/drivers_context/sdl3_gl_ctx.o
+   endif
+
+   ifeq ($(HAVE_VULKAN), 1)
+      OBJ += gfx/drivers_context/sdl3_vk_ctx.o
+   endif
 else ifeq ($(HAVE_SDL2), 1)
    HAVE_SDL_COMMON = 1
    OBJ += gfx/drivers/sdl2_gfx.o \
@@ -1767,6 +1772,7 @@ ifeq ($(HAVE_OPENGL_CORE), 1)
 
    ifeq ($(HAVE_SLANG), 1)
       OBJ += gfx/drivers_shader/shader_gl3.o
+      OBJ += gfx/drivers_shader/spirv_opengl.o
 
       NEED_CXX_LINKER = 1
    endif
@@ -2323,6 +2329,14 @@ ifeq ($(HAVE_RVP9), 1)
    OBJ += $(LIBRETRO_COMM_DIR)/formats/image/image_hdr_blit.o
 endif
 
+ifeq ($(HAVE_RMPEG1), 1)
+   DEFINES += -DHAVE_RMPEG1
+   OBJ += $(LIBRETRO_COMM_DIR)/formats/mpeg1/rmpeg1_ps.o \
+          $(LIBRETRO_COMM_DIR)/formats/mpeg1/rmpeg1_video.o
+   # MPEG-1 audio is layer II, which rmp3 already decodes; a consumer that
+   # wants sound from an MPEG-1 stream needs HAVE_RMP3 as well.
+endif
+
 ifeq ($(HAVE_WEBMPLAYER), 1)
    DEFINES += -DHAVE_WEBMPLAYER
    OBJ += cores/libretro-webm/webm_core.o
@@ -2872,7 +2886,15 @@ ifneq (,$(filter 1,$(HAVE_SMBCLIENT) $(HAVE_BUILTINSMBCLIENT)))
    else ifeq ($(HAVE_BUILTINSMBCLIENT),1)
       # builtin libsmb2
       ifneq ($(findstring Win32,$(OS)),)
-         CFLAGS += -D_WINDOWS -DWIN32_LEAN_AND_MEAN
+         # WIN32_LEAN_AND_MEAN is defined with an empty replacement list on
+         # purpose. It has to be on the command line because the bundled
+         # libsmb2 needs it, but it lands on every TU in the build, and ~40
+         # RetroArch headers do a bare "#define WIN32_LEAN_AND_MEAN" of their
+         # own before including <windows.h>. A plain -DWIN32_LEAN_AND_MEAN
+         # expands to 1, which does not match those, so each one of them
+         # warns about a macro redefinition. Nothing tests the value, only
+         # #ifndef, so an empty definition is equivalent and silent.
+         CFLAGS += -D_WINDOWS -DWIN32_LEAN_AND_MEAN=
          CFLAGS += -DNEED_RANDOM -DNEED_SRANDOM -DNEED_GETLOGIN_R
       endif
       INCLUDE_DIRS += -I$(DEPS_DIR)/libsmb2/include
