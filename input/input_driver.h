@@ -588,6 +588,12 @@ typedef struct
    const input_device_driver_t   *secondary_joypad;      /* ptr alignment */
    const retro_keybind_set *libretro_input_binds[MAX_USERS];
 #ifdef HAVE_COMMAND
+   /* Bumped whenever the command interfaces below are torn down. A
+    * command that reinitialises the input driver - LOAD_CONTENT,
+    * DRIVERS_REINIT - frees the very object whose poll dispatched it;
+    * the dispatcher compares this before and after and stops when it
+    * has changed rather than touch that object again. */
+   unsigned command_generation;
    command_t *command[MAX_CMD_DRIVERS];
 #endif
 #ifdef HAVE_BSV_MOVIE
@@ -623,6 +629,7 @@ typedef struct
 #endif
 #endif
    int osk_ptr;
+   bool osk_textbox_focus;
    turbo_buttons_t turbo_btns; /* int32_t alignment */
    hold_buttons_t hold_btns;   /* int32_t alignment */
 
@@ -662,6 +669,16 @@ typedef struct
     * old per-button query pattern instead of JOYPAD_MASK.
     * Invalidated at the start of each input_driver_poll(). */
    int32_t joypad_state_cache[MAX_USERS];
+
+   /* Per-port set of RetroPad buttons (bits 0..RARCH_FIRST_CUSTOM_BIND-1)
+    * that INP_FLAG_WAIT_INPUT_RELEASE is still waiting on.  Captured
+    * from whatever is held on the frame the wait is armed and pruned
+    * as those buttons are released; a button pressed after the wait
+    * was armed is never in the set, so it is delivered normally.
+    * While the flag is clear it simply tracks what is held, so a wait
+    * armed outside input_keys_pressed() starts from the previous
+    * frame's held set. */
+   uint16_t wait_release_mask[MAX_USERS];
    bool    joypad_state_cache_valid[MAX_USERS];
 
    retro_bits_512_t keyboard_mapping_bits;    /* bool alignment */
@@ -893,6 +910,20 @@ void input_config_set_device_config_name(unsigned port, const char *name);
 void input_config_set_device_joypad_driver(unsigned port, const char *driver);
 
 /**
+ * Set the physical location of the device in the specified port
+ *
+ * A NULL or empty location clears the stored one, so that a port
+ * whose device reports no location cannot inherit the location of
+ * whatever occupied it before.
+ *
+ * @param port
+ * The port of the device to be assigned to
+ * @param phys
+ * The physical location to set the given port to.
+ */
+void input_config_set_device_phys(unsigned port, const char *phys);
+
+/**
  * Set the vendor ID (vid) for the device in the specified port
  *
  * @param port
@@ -975,6 +1006,7 @@ const char *input_config_get_device_display_name(unsigned port);
 const char *input_config_get_mouse_display_name(unsigned port);
 const char *input_config_get_device_config_name(unsigned port);
 const char *input_config_get_device_joypad_driver(unsigned port);
+const char *input_config_get_device_phys(unsigned port);
 
 /**
  * Retrieves the vendor id (vid) of a connected controller
@@ -1181,6 +1213,9 @@ const char *joypad_driver_name(unsigned i);
 void joypad_driver_reinit(void *data, const char *joypad_driver_name);
 
 #ifdef HAVE_COMMAND
+/* See command_generation in input_driver_state_t. */
+unsigned input_driver_command_generation(void);
+
 void input_driver_init_command(
       input_driver_state_t *input_st,
       settings_t *settings);
@@ -1213,6 +1248,10 @@ bool movie_skip_to_prev_checkpoint(input_driver_state_t *input_st);
 bool movie_skip_to_next_checkpoint(input_driver_state_t *input_st);
 bool movie_seek_to_frame(input_driver_state_t *input_st, int64_t frame);
 bool movie_start_playback(input_driver_state_t *input_st, char *path);
+
+/* True while a playback-start task is pending, i.e. until its
+ * callback has installed the replay handle. */
+bool movie_playback_start_in_progress(void *data);
 bool movie_start_record(input_driver_state_t *input_st, char *path);
 bool movie_stop_playback(input_driver_state_t *input_st);
 bool movie_stop_record(input_driver_state_t *input_st);

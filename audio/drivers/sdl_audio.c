@@ -22,7 +22,7 @@
 
 #include <boolean.h>
 #include <rthreads/rthreads.h>
-#include <queues/fifo_queue.h>
+#include <retro_spsc.h>
 #include <retro_inline.h>
 #include <retro_math.h>
 #include <lists/string_list.h>
@@ -45,11 +45,27 @@
 #include "../../runloop.h"
 #include "../../verbosity.h"
 
+/* Frames per device buffer for the given slice of the latency setting:
+ * a power of two, as SDL prefers, rounded down so the device stage
+ * never exceeds its share, with a floor a device will accept. Rounding
+ * up put a 16 ms share at 21.3 ms on a 48 kHz device. */
 static INLINE int sdl_audio_find_num_frames(int rate, int latency)
 {
    int frames = (rate * latency) / 1000;
-   /* SDL only likes 2^n sized buffers. */
-   return next_pow2(frames);
+   int pow2   = (int)prev_pow2((uint32_t)frames);
+   if (pow2 < 64)
+      pow2    = 64;
+   return pow2;
+}
+
+/* Room in a ring against its logical size: the physical room less the
+ * capacity that lies beyond the size asked for (retro_spsc rounds up
+ * to a power of two). */
+static size_t sdl_ring_room(const retro_spsc_t *ring, size_t ring_size)
+{
+   size_t room   = retro_spsc_write_avail(ring);
+   size_t excess = ring->capacity - ring_size;
+   return room > excess ? room - excess : 0;
 }
 
 #ifdef HAVE_SDL2
@@ -65,8 +81,17 @@ typedef struct sdl_microphone_handle
 
    /**
     * The queue used to store incoming samples from the driver.
+    * Single producer (SDL's capture thread in sdl_audio_record_cb),
+    * single consumer (the core thread in sdl_microphone_read), so it
+    * is a lock-free retro_spsc ring and neither side needs
+    * SDL_LockAudioDevice() to touch it.  retro_spsc rounds the
+    * capacity up to a power of two; ring_size is the size asked for
+    * and the producer never fills past it, so the queue behaves like
+    * the old fifo of the same size.
     */
-   fifo_buffer_t *sample_buffer;
+   retro_spsc_t      ring;
+   size_t            ring_size;
+   bool              ring_init;
    SDL_AudioDeviceID device_id;
    SDL_AudioSpec device_spec;
 } sdl_microphone_handle_t;
@@ -106,7 +131,8 @@ static void sdl_microphone_close_mic(void *driver_context, void *mic_context)
       if (mic->device_id > 0)
          SDL_CloseAudioDevice(mic->device_id);
 
-      fifo_free(mic->sample_buffer);
+      if (mic->ring_init)
+         retro_spsc_free(&mic->ring);
 
 #ifdef HAVE_THREADS
       slock_free(mic->lock);
@@ -131,10 +157,10 @@ static void sdl_microphone_free(void *data)
 static void sdl_audio_record_cb(void *data, Uint8 *stream, int len)
 {
    sdl_microphone_handle_t *mic = (sdl_microphone_handle_t*)data;
-   size_t                 avail = FIFO_WRITE_AVAIL(mic->sample_buffer);
+   size_t                 avail = sdl_ring_room(&mic->ring, mic->ring_size);
    size_t             read_size = MIN(len, (int)avail);
    /* If the sample buffer is almost full, just write as much as we can into it*/
-   fifo_write(mic->sample_buffer, stream, read_size);
+   retro_spsc_write(&mic->ring, stream, read_size);
 #ifdef HAVE_THREADS
    scond_signal(mic->cond);
 #endif
@@ -253,21 +279,17 @@ static void *sdl_microphone_open_mic(void *driver_context, const char *device,
    /* Create a buffer twice as big as needed and prefill the buffer. */
    bufsize            = mic->device_spec.samples * 2 * (SDL_AUDIO_BITSIZE(mic->device_spec.format) / 8);
    tmp                = calloc(1, bufsize);
-   mic->sample_buffer = fifo_new(bufsize);
+   mic->ring_size     = bufsize;
+   mic->ring_init     = retro_spsc_init(&mic->ring, bufsize);
 
    RARCH_DBG("[SDL audio] Initialized microphone sample queue with %u bytes.\n", bufsize);
 
-   /* NULL-check fifo_new: hot-path audio callbacks
-    * (sdl_microphone_read_cb, sdl_microphone_read) index into
-    * mic->sample_buffer unconditionally via FIFO_READ_AVAIL and
-    * fifo_read/fifo_write.  fifo_* NULL-deref on a NULL buffer
-    * pointer (see libretro-common/queues/fifo_queue.c).  Bail to
-    * the existing 'error' label on OOM - it frees 'mic' and
-    * returns NULL, same as the outer calloc-failure path at the
-    * top of this function.  'tmp' is freed by the 'if (tmp)'
-    * block below, not here (calloc may have succeeded even if
-    * fifo_new failed, so defer tmp cleanup to after the guard). */
-   if (!mic->sample_buffer)
+   /* Bail to the existing 'error' label on OOM - it frees 'mic' and
+    * returns NULL, same as the outer calloc-failure path at the top
+    * of this function.  'tmp' is freed by the 'if (tmp)' block below,
+    * not here (calloc may have succeeded even if the ring init
+    * failed, so defer tmp cleanup to after the guard). */
+   if (!mic->ring_init)
    {
       free(tmp);
       goto error;
@@ -275,7 +297,7 @@ static void *sdl_microphone_open_mic(void *driver_context, const char *device,
 
    if (tmp)
    {
-      fifo_write(mic->sample_buffer, tmp, bufsize);
+      retro_spsc_write(&mic->ring, tmp, bufsize);
       free(tmp);
    }
 
@@ -284,7 +306,7 @@ static void *sdl_microphone_open_mic(void *driver_context, const char *device,
 
 error:
    /* HAVE_THREADS may have init'd mic->lock and mic->cond between
-    * the SDL_OpenAudioDevice call and the fifo_new below.
+    * the SDL_OpenAudioDevice call and the retro_spsc_init below.
     * slock_free/scond_free are NULL-tolerant so the earlier goto
     * error site (device_id == 0) where these are still NULL is
     * fine too.  'mic' is always non-NULL at this label because
@@ -361,6 +383,34 @@ static void sdl_microphone_set_nonblock_state(void *driver_context, bool state)
       sdl->nonblock = state;
 }
 
+/* Sleeps until the capture queue holds len bytes, then says how many it
+ * holds. The same bounded wait sdl_microphone_read() does - the SDL
+ * capture callback is the only thing that ever signals this condition,
+ * so an untimed wait never returns once the device stops calling back -
+ * without the copy out. */
+static size_t sdl_microphone_wait_readable(void *driver_context,
+      void *mic_context, size_t len)
+{
+   sdl_microphone_handle_t *mic = (sdl_microphone_handle_t*)mic_context;
+   size_t avail;
+
+   if (!mic || !mic->ring_init)
+      return 0;
+
+   avail = retro_spsc_read_avail(&mic->ring);
+
+   if (avail >= len)
+      return avail;
+
+#ifdef HAVE_THREADS
+   slock_lock(mic->lock);
+   scond_wait_timeout(mic->cond, mic->lock, SDL_AUDIO_STALL_TIMEOUT_US);
+   slock_unlock(mic->lock);
+#endif
+
+   return retro_spsc_read_avail(&mic->ring);
+}
+
 static int sdl_microphone_read(void *driver_context, void *mic_context, void *sv, size_t len)
 {
    int ret    = 0;
@@ -374,17 +424,9 @@ static int sdl_microphone_read(void *driver_context, void *mic_context, void *sv
    /* If we shouldn't block on an empty queue... */
    if (sdl->nonblock)
    {
-      size_t avail, read_amt;
-      SDL_LockAudioDevice(mic->device_id); /* Stop the SDL mic thread */
-      avail    = FIFO_READ_AVAIL(mic->sample_buffer);
-      read_amt = avail > len ? len : avail;
-      /* If the incoming queue isn't empty, then
-       * read as much data as will fit in buf
-       * */
-      if (read_amt > 0)
-         fifo_read(mic->sample_buffer, s, read_amt);
-      SDL_UnlockAudioDevice(mic->device_id); /* Let the mic thread run again */
-      ret = (int)read_amt;
+      /* Read as much data as will fit in buf; the ring is SPSC so the
+       * SDL capture thread can keep pushing while we pull. */
+      ret = (int)retro_spsc_read(&mic->ring, s, len);
    }
    else
    {
@@ -398,14 +440,11 @@ static int sdl_microphone_read(void *driver_context, void *mic_context, void *sv
          bool signalled;
 #endif
 
-         SDL_LockAudioDevice(mic->device_id);
-         /* Stop the SDL microphone thread from running */
-         avail = FIFO_READ_AVAIL(mic->sample_buffer);
+         avail = retro_spsc_read_avail(&mic->ring);
 
          if (avail == 0)
          { /* If the incoming sample queue is empty... */
-            SDL_UnlockAudioDevice(mic->device_id);
-            /* Let the SDL microphone thread run so it can
+            /* Wait for the SDL microphone thread to
              * push some incoming samples */
 #ifdef HAVE_THREADS
             slock_lock(mic->lock);
@@ -429,11 +468,9 @@ static int sdl_microphone_read(void *driver_context, void *mic_context, void *sv
          else
          {
             size_t read_amt = MIN(len - read, avail);
-            fifo_read(mic->sample_buffer, s + read, read_amt);
+            retro_spsc_read(&mic->ring, s + read, read_amt);
             /* Read as many samples as we have available without
              * underflowing the queue */
-            SDL_UnlockAudioDevice(mic->device_id);
-            /* Let the SDL microphone thread run again */
             read += read_amt;
          }
       }
@@ -463,6 +500,7 @@ microphone_driver_t microphone_sdl = {
       sdl_microphone_start_mic,
       sdl_microphone_stop_mic,
       sdl_microphone_mic_use_float,
+      sdl_microphone_wait_readable
 };
 #endif
 #else
@@ -505,19 +543,26 @@ typedef struct sdl_audio
     * Audio from the core ultimately makes its way here,
     * the last stop before the driver plays it.
     */
-   fifo_buffer_t *speaker_buffer;
+   /* Outgoing samples.  Single producer (the core thread in
+    * sdl_audio_write), single consumer (SDL's playback thread in
+    * sdl_audio_playback_cb): a lock-free retro_spsc ring, so the
+    * writer no longer has to SDL_LockAudioDevice() - i.e. stall the
+    * playback callback - to push samples.  speaker_ring_size is the
+    * size asked for; see sdl_ring_room. */
+   retro_spsc_t speaker_ring;
+   size_t       speaker_ring_size;
+   bool         speaker_ring_init;
    bool nonblock;
    bool is_paused;
    SDL_AudioSpec device_spec;
+   uint32_t      layout;   /* the layout asked for, reported when the count matched */
    SDL_AudioDeviceID speaker_device;
 } sdl_audio_t;
 
 static void sdl_audio_playback_cb(void *data, Uint8 *stream, int len)
 {
    sdl_audio_t  *sdl = (sdl_audio_t*)data;
-   size_t      avail = FIFO_READ_AVAIL(sdl->speaker_buffer);
-   size_t       _len = (len > (int)avail) ? avail : (size_t)len;
-   fifo_read(sdl->speaker_buffer, stream, _len);
+   size_t       _len = retro_spsc_read(&sdl->speaker_ring, stream, (size_t)len);
 #ifdef HAVE_THREADS
    scond_signal(sdl->cond);
 #endif
@@ -554,7 +599,7 @@ static void sdl_audio_free(void *data);
 
 static void *sdl_audio_init(const char *device,
       unsigned rate, unsigned latency,
-      unsigned block_frames, unsigned *new_rate)
+       unsigned *new_rate)
 {
    int frames;
    size_t bufsize;
@@ -597,7 +642,15 @@ static void *sdl_audio_init(const char *device,
 #else
    spec.format   = AUDIO_S16SYS;
 #endif
-   spec.channels = 2;
+   /* The channels of the layout the frontend wants; SDL converts if
+    * the device lacks them, so what it grants is what the frontend
+    * gets, in SDL's fixed interleaved order for the count - which is
+    * the layout's ascending-bit order. SDL does not say whether a
+    * six-channel device's rear pair is at the back or the sides; it
+    * takes the frames in that order and maps them itself, so the
+    * layout reported is the one asked for. */
+   sdl->layout   = audio_driver_requested_layout();
+   spec.channels = (Uint8)audio_layout_channels(sdl->layout);
    spec.samples  = frames; /* This is in audio frames, not samples ... :( */
    spec.callback = sdl_audio_playback_cb;
    spec.userdata = sdl;
@@ -645,24 +698,35 @@ static void *sdl_audio_init(const char *device,
    sdl->cond                = scond_new();
 #endif
 
-   RARCH_LOG("[SDL audio] Requested %u ms latency for output device, received %d ms.\n",
-         latency, (int)(sdl->device_spec.samples * 4 * 1000 / (*new_rate)));
+   /* The fifo in front of the device holds the latency setting, as the
+    * other drivers' buffers do; the device buffer behind it, a quarter
+    * of the setting rounded down to a power of two, is SDL's and adds
+    * on top, unmeasured. The fifo is never smaller than two device
+    * buffers, so the callback always has a buffer's worth in hand.
+    * It used to be two device buffers exactly, with the device buffer
+    * rounded up - 42.7 ms reported against a 64 ms setting - and the
+    * line here claimed four. */
+   {
+      size_t frame_bytes = (size_t)sdl->device_spec.channels
+            * (SDL_AUDIO_BITSIZE(sdl->device_spec.format) / 8);
+      size_t fifo_frames = ((size_t)(*new_rate) * latency) / 1000;
+      if (fifo_frames < (size_t)sdl->device_spec.samples * 2)
+         fifo_frames     = (size_t)sdl->device_spec.samples * 2;
+      bufsize            = fifo_frames * frame_bytes;
+   }
 
-   /* Create a buffer twice as big as needed and prefill the buffer. */
-   bufsize             = sdl->device_spec.samples * 4 * (SDL_AUDIO_BITSIZE(sdl->device_spec.format) / 8);
-   tmp                 = calloc(1, bufsize);
-   sdl->speaker_buffer = fifo_new(bufsize);
+   RARCH_LOG("[SDL audio] Requested %u ms latency: %u ms fifo, plus a %u-frame (%u ms) device buffer.\n",
+         latency,
+         (unsigned)(bufsize / (2 * (SDL_AUDIO_BITSIZE(sdl->device_spec.format) / 8)) * 1000 / (*new_rate)),
+         (unsigned)sdl->device_spec.samples,
+         (unsigned)(sdl->device_spec.samples * 1000 / (*new_rate)));
 
-   /* NULL-check fifo_new: hot-path audio callbacks
-    * (sdl_audio_playback_cb, sdl_audio_write) index into
-    * sdl->speaker_buffer unconditionally via FIFO_WRITE_AVAIL /
-    * FIFO_READ_AVAIL and fifo_read/fifo_write.  fifo_* NULL-deref
-    * on a NULL buffer.  Bail via sdl_audio_free which already
-    * handles partial init state (speaker_device guard at line
-    * ~716, speaker_buffer guard at line ~721, HAVE_THREADS locks
-    * nullable).  'tmp' is owned here on failure since we haven't
-    * transferred it to the fifo yet. */
-   if (!sdl->speaker_buffer)
+   tmp                    = calloc(1, bufsize);
+   sdl->speaker_ring_size = bufsize;
+   sdl->speaker_ring_init = retro_spsc_init(&sdl->speaker_ring, bufsize);
+
+   /* Bail on OOM (see the mic path above). */
+   if (!sdl->speaker_ring_init)
    {
       free(tmp);
       sdl_audio_free(sdl);
@@ -671,7 +735,7 @@ static void *sdl_audio_init(const char *device,
 
    if (tmp)
    {
-      fifo_write(sdl->speaker_buffer, tmp, bufsize);
+      retro_spsc_write(&sdl->speaker_ring, tmp, bufsize);
       free(tmp);
    }
 
@@ -690,13 +754,10 @@ static ssize_t sdl_audio_write(void *data, const void *s, size_t len)
    /* If we shouldn't wait for space in a full outgoing sample queue... */
    if (sdl->nonblock)
    {
-      size_t avail, write_amt;
-      SDL_LockAudioDevice(sdl->speaker_device); /* Stop the SDL speaker thread from running */
-      avail     = FIFO_WRITE_AVAIL(sdl->speaker_buffer);
-      write_amt = (avail > len) ? len : avail; /* Enqueue as much data as we can */
-      fifo_write(sdl->speaker_buffer, s, write_amt);
-      SDL_UnlockAudioDevice(sdl->speaker_device); /* Let the speaker thread run again */
-      _len      = write_amt; /* If the queue was full...well, too bad. */
+      size_t avail     = sdl_ring_room(&sdl->speaker_ring, sdl->speaker_ring_size);
+      size_t write_amt = (avail > len) ? len : avail; /* Enqueue as much data as we can */
+      retro_spsc_write(&sdl->speaker_ring, s, write_amt);
+      _len             = write_amt; /* If the queue was full...well, too bad. */
    }
    else
    {
@@ -708,22 +769,17 @@ static ssize_t sdl_audio_write(void *data, const void *s, size_t len)
          bool signalled;
 #endif
 
-         /* Stop the SDL speaker thread from running */
-         SDL_LockAudioDevice(sdl->speaker_device);
-         avail = FIFO_WRITE_AVAIL(sdl->speaker_buffer);
+         avail = sdl_ring_room(&sdl->speaker_ring, sdl->speaker_ring_size);
 
          /* If the outgoing sample queue is full... */
          if (avail == 0)
          {
-            SDL_UnlockAudioDevice(sdl->speaker_device);
-            /* Let the SDL speaker thread run so it can play the enqueued samples,
+            /* Wait for the SDL speaker thread to play the enqueued samples,
              * which will free up space for us to write new ones. */
 #ifdef HAVE_THREADS
             slock_lock(sdl->lock);
-            /* Let *only* the SDL speaker thread touch the outgoing sample queue.
-             * Bounded: the wait is on sdl->lock while the queue is guarded by
-             * SDL_LockAudioDevice, and sdl_audio_playback_cb signals without
-             * holding sdl->lock, so a signal raised between the avail test and
+            /* Bounded: sdl_audio_playback_cb signals without holding
+             * sdl->lock, so a signal raised between the avail test and
              * this wait reaches no waiter.  Normally the next callback covers
              * that.  If the device has stopped calling back at all there is no
              * next one, and an untimed wait here parked the core's thread for
@@ -743,9 +799,8 @@ static ssize_t sdl_audio_write(void *data, const void *s, size_t len)
          else
          {
             size_t write_amt = len - _len > avail ? avail : len - _len;
-            fifo_write(sdl->speaker_buffer, (const char*)s + _len, write_amt);
+            retro_spsc_write(&sdl->speaker_ring, (const char*)s + _len, write_amt);
             /* Enqueue as many samples as we have available without overflowing the queue */
-            SDL_UnlockAudioDevice(sdl->speaker_device); /* Let the SDL speaker thread run again */
             _len += write_amt;
          }
       }
@@ -796,8 +851,8 @@ static void sdl_audio_free(void *data)
          SDL_CloseAudioDevice(sdl->speaker_device);
       }
 
-      if (sdl->speaker_buffer)
-         fifo_free(sdl->speaker_buffer);
+      if (sdl->speaker_ring_init)
+         retro_spsc_free(&sdl->speaker_ring);
 
 #ifdef HAVE_THREADS
       slock_free(sdl->lock);
@@ -809,6 +864,14 @@ static void sdl_audio_free(void *data)
    free(sdl);
 }
 
+static uint32_t sdl_audio_layout(void *data)
+{
+   sdl_audio_t *sdl = (sdl_audio_t*)data;
+   if (!sdl || sdl->device_spec.channels != audio_layout_channels(sdl->layout))
+      return AUDIO_LAYOUT_STEREO;
+   return sdl->layout;
+}
+
 static bool sdl_audio_use_float(void *data)
 {
    sdl_audio_t *sdl = (sdl_audio_t*)data;
@@ -816,7 +879,58 @@ static bool sdl_audio_use_float(void *data)
 }
 
 /* TODO/FIXME - implement */
-static size_t sdl_audio_write_avail(void *data) { return 0; }
+static size_t sdl_audio_write_avail(void *data)
+{
+   sdl_audio_t *sdl = (sdl_audio_t*)data;
+   return sdl_ring_room(&sdl->speaker_ring, sdl->speaker_ring_size);
+}
+
+static size_t sdl_audio_buffer_size(void *data)
+{
+   sdl_audio_t *sdl = (sdl_audio_t*)data;
+   /* The size asked for, which is what write_avail() can reach; the
+    * ring's physical capacity may be larger (power of two). */
+   return sdl->speaker_ring_size;
+}
+
+/* Sleep on the condition the speaker thread signals after every pull
+ * until at least len bytes fit in the outgoing queue, capped at half
+ * of it so the wait always ends. Returns the free space then, or 0
+ * when the thread has gone quiet for the stall timeout (device lost)
+ * or there is no thread to wait on. */
+static size_t sdl_audio_wait_writable(void *data, size_t len)
+{
+   sdl_audio_t *sdl = (sdl_audio_t*)data;
+   size_t avail;
+   /* Each wait ends on a timeout; this ends the loop when the device
+    * keeps calling back but never frees enough. */
+   int laps = 8;
+
+   if (len > sdl->speaker_ring_size / 2)
+      len = sdl->speaker_ring_size / 2;
+
+   for (;;)
+   {
+#ifdef HAVE_THREADS
+      bool signalled;
+#endif
+      if (laps-- < 0)
+         return 0;
+      avail = sdl_ring_room(&sdl->speaker_ring, sdl->speaker_ring_size);
+      if (avail >= len)
+         return avail;
+#ifdef HAVE_THREADS
+      slock_lock(sdl->lock);
+      signalled = scond_wait_timeout(sdl->cond, sdl->lock,
+            SDL_AUDIO_STALL_TIMEOUT_US);
+      slock_unlock(sdl->lock);
+      if (!signalled)
+         return 0;
+#else
+      return 0;
+#endif
+   }
+}
 
 static void sdl_audio_list_free(void *u, void *slp)
 {
@@ -843,6 +957,10 @@ audio_driver_t audio_sdl = {
    sdl_audio_list_new,
    sdl_audio_list_free,
    sdl_audio_write_avail,
-   NULL, /* buffer_size */
-   NULL  /* write_raw */
+   sdl_audio_buffer_size,
+   NULL, /* write_raw */
+   sdl_audio_wait_writable,
+   NULL, /* consumed */
+   NULL, /* underruns */
+   sdl_audio_layout
 };

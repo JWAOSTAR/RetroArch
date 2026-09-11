@@ -54,6 +54,10 @@ static unsigned sdl3_gl_minor = 0;
 static SDL_GLContext sdl3_gl_cached_ctx = NULL;
 static SDL_GLContext sdl3_gl_cached_shared_ctx = NULL;
 
+/* The make_current hook receives no pointer, so track it at
+ * the file scope (same as x_ctx). */
+static gfx_ctx_sdl3_data_t *sdl3_gl_current = NULL;
+
 /* Core-profile context: explicitly requested, or GL 3.1+. */
 static bool sdl3_gl_core_profile(gfx_ctx_sdl3_data_t *sdl)
 {
@@ -100,6 +104,9 @@ static void sdl3_ctx_destroy(void *data)
    if (!sdl3_gl_cached_ctx)
       SDL_QuitSubSystem(SDL_INIT_VIDEO);
 
+   if (sdl3_gl_current == sdl)
+      sdl3_gl_current = NULL;
+
    free(sdl);
 }
 
@@ -116,6 +123,8 @@ static void *sdl3_ctx_init(void *video_driver)
    if (!sdl)
       return NULL;
 
+   sdl3_set_app_metadata();
+
    /* When a cached context is stashed, the previous instance kept its
     * video-subsystem reference to protect it - adopt that reference
     * instead of initializing again. */
@@ -128,6 +137,8 @@ static void *sdl3_ctx_init(void *video_driver)
 
    RARCH_LOG("[SDL3 GL] SDL %d.%d.%d gfx context driver initialized.\n",
          SDL_MAJOR_VERSION, SDL_MINOR_VERSION, SDL_MICRO_VERSION);
+
+   sdl3_gl_current = sdl;
 
    return sdl;
 }
@@ -169,6 +180,14 @@ static bool sdl3_ctx_set_video_mode(void *data,
    /* GL attributes must be set before the window is created. */
    if (!sdl->win)
    {
+#ifdef GL_DEBUG
+      SDL_GL_SetAttribute(SDL_GL_CONTEXT_FLAGS, SDL_GL_CONTEXT_DEBUG_FLAG);
+#else
+      struct retro_hw_render_callback *hwr = video_driver_get_hw_context();
+      if (hwr && hwr->debug_context)
+         SDL_GL_SetAttribute(SDL_GL_CONTEXT_FLAGS, SDL_GL_CONTEXT_DEBUG_FLAG);
+#endif
+
       if (sdl3_gl_api == GFX_CTX_OPENGL_ES_API)
          SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
       else if (sdl3_gl_core_profile(sdl))
@@ -312,6 +331,29 @@ static void sdl3_ctx_bind_hw_render(void *data, bool enable)
       SDL_GL_MakeCurrent(sdl->win, sdl->ctx);
 }
 
+/* With threaded video, gl3/gl2 bind the GL context on the video
+ * thread. Without this hook those binds don't do anything and
+ * the textures created without a current context, resulting in
+ * black menu icons. */
+static void sdl3_ctx_make_current(bool release)
+{
+   if (!sdl3_gl_current || !sdl3_gl_current->win)
+      return;
+   SDL_GL_MakeCurrent(sdl3_gl_current->win,
+         release ? NULL : sdl3_gl_current->ctx);
+}
+
+/* As in the SDL2 context: minimised or hidden means SDL_GL_SwapWindow()
+ * returns at once rather than blocking to vblank. */
+static bool sdl3_ctx_presentable(void *data)
+{
+   gfx_ctx_sdl3_data_t *sdl = (gfx_ctx_sdl3_data_t*)data;
+   if (sdl && sdl->win)
+      return !(SDL_GetWindowFlags(sdl->win)
+            & (SDL_WINDOW_MINIMIZED | SDL_WINDOW_HIDDEN));
+   return true;
+}
+
 const gfx_ctx_driver_t gfx_ctx_sdl3_gl =
 {
    sdl3_ctx_init,
@@ -325,7 +367,7 @@ const gfx_ctx_driver_t gfx_ctx_sdl3_gl =
    NULL, /* get_video_output_size */
    NULL, /* get_video_output_prev */
    NULL, /* get_video_output_next */
-   NULL, /* get_metrics */
+   sdl3_ctx_get_metrics,
    NULL, /* translate_aspect */
    sdl3_ctx_update_title,
    sdl3_ctx_check_window,
@@ -344,7 +386,8 @@ const gfx_ctx_driver_t gfx_ctx_sdl3_gl =
    sdl3_ctx_set_flags,
    sdl3_ctx_bind_hw_render,
    NULL, /* get_context_data */
-   NULL, /* make_current */
+   sdl3_ctx_make_current,
    NULL, /* create_surface */
-   NULL  /* destroy_surface */
+   NULL, /* destroy_surface */
+   sdl3_ctx_presentable
 };

@@ -668,6 +668,11 @@ size_t rwebm_video_stream_consumed(rwebm_video_stream_t *s)
    return s ? rwebm_tell(s->demux) : 0;
 }
 
+int64_t rwebm_video_stream_duration_ns(rwebm_video_stream_t *s)
+{
+   return (s && s->demux) ? rwebm_duration_ns(s->demux) : 0;
+}
+
 void rwebm_video_stream_complete_scan(rwebm_video_stream_t *s,
       const uint8_t *buf, size_t len)
 {
@@ -954,8 +959,11 @@ void rwebm_video_set_avail(rwebm_video_t *webm, size_t avail)
    webm->partial = 1;
    if (avail > webm->len)
       avail = webm->len;
-   if (avail > webm->avail)   /* monotonic */
-      webm->avail = avail;
+   /* An exact store: see rmp4_set_avail.  The bound is "readable
+    * right now"; a windowed feeder lowers it after a loop's rewind,
+    * and a raise-only mirror here would keep handing the stream its
+    * stale high-water mark - reads of decommitted pages one lap in. */
+   webm->avail = avail;
    if (webm->stream)
       rwebm_video_stream_set_avail(webm->stream, webm->avail);
 }

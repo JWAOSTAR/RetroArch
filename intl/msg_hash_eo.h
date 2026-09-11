@@ -1451,7 +1451,6 @@ static const struct
    char s_012938fb[21];
    char s_a747cdc9[51];
    char s_2f169651[19];
-   char s_73674a86[16];
    char s_705eee28[39];
    char s_62af62ac[30];
    char s_12b25a4b[40];
@@ -1577,7 +1576,6 @@ static const struct
    char s_74b77b4a[18];
    char s_7534cfc9[7];
    char s_36259b63[14];
-   char s_37368130[14];
    char s_d51f54a2[12];
    char s_b35f573c[6];
    char s_1cad7751[6];
@@ -1967,7 +1965,6 @@ static const struct
    char s_c7bc8298[20];
    char s_e63b035a[25];
    char s_d21d875b[20];
-   char s_ae86fed0[25];
    char s_b12ae22e[17];
    char s_b2d073c7[17];
    char s_1cbc2657[18];
@@ -2036,6 +2033,7 @@ static const struct
    char s_519cd5f8[21];
    char s_43ac80a0[14];
    char s_6959ce80[16];
+   char s_aa628249[9];
    char s_ebe994b4[13];
    char s_1c62c301[9];
    char s_a8bb35b6[9];
@@ -3378,16 +3376,10 @@ static const struct
 #ifdef HAVE_SMBCLIENT
    char s_3e1e294b[49];
    char s_69c0e487[57];
-   char s_706ff4dc[180];
    char s_a0d1a85c[51];
-   char s_b5966528[1];
    char s_907ef7cc[39];
    char s_b0a46506[47];
-   char s_04624c88[44];
-   char s_91976dbe[33];
    char s_f6492edc[45];
-   char s_9bb85635[32];
-   char s_22a05685[32];
 #endif
    char s_f3bfa8b9[97];
    char s_5fe2cee5[67];
@@ -3531,7 +3523,6 @@ static const struct
    char s_1eebf4f8[172];
    char s_2f2ca2b6[172];
    char s_2c9be635[135];
-   char s_05ec12e6[157];
    char s_b5a603de[61];
    char s_d9c2db25[59];
 #ifdef HAVE_ODROIDGO2
@@ -3574,7 +3565,6 @@ static const struct
    char s_d62ed5dc[349];
    char s_2e69508b[366];
    char s_7e96b5ce[39];
-   char s_3547866d[135];
    char s_c2314d30[210];
 #if defined(RARCH_MOBILE)
    char s_82c9e375[183];
@@ -3692,6 +3682,7 @@ static const struct
    char s_ec5751c3[36];
    char s_af4b70f4[49];
    char s_d9afe3b5[44];
+   char s_70ecb843[12];
    char s_312fd783[55];
    char s_96df643a[100];
    char s_150b4ebe[95];
@@ -5807,7 +5798,6 @@ static const struct
    "Bildeta skal-faktoro",
    "Distran\304\211i ludlsitajn nomojn (bezonas restartigon)",
    "Uzi re\304\235imon PAL60",
-   "Patra dosierujo",
    "Pa\305\255zi enhavon kiam menuo estas aktiva",
    "Pa\305\255zi enhavon kiam ne aktiva",
    "Pa\305\255zi enhavon pro malkonekto de regilo",
@@ -5933,7 +5923,6 @@ static const struct
    "&Mal\305\235argi kernon",
    "&Helpo",
    "Pri RetroArch",
-   "Kontribuintoj",
    "Dokumentado",
    "Vi\305\235i",
    "&Iloj",
@@ -6331,7 +6320,6 @@ static const struct
    "Agordoj de reto SMB",
    "Kunhaviga\304\265a nomo de SMB",
    "Kunhaviga\304\265o de SMB",
-   "Subdosierujo SMB (opcia)",
    "Tempolimo de SMB",
    "Uzantnomo de SMB",
    "Laborgrupo de SMB",
@@ -6400,6 +6388,7 @@ static const struct
    "Operaciumo de fasado",
    "Versio de Git",
    "Versio de Lakka",
+   "Ludritmo",
    "Kurentofonto",
    "\305\234argita",
    "\305\234argata",
@@ -8132,18 +8121,10 @@ static const struct
 #ifdef HAVE_SMBCLIENT
    "Elekti la a\305\255tentokontrolon uzotan en via medio.",
    "Foliumi dosierojn en la konfigurita kunhaviga\304\265o de SMB.",
-   "Ebligi aliron al kunhaviga\304\265o de reto SMB. Oni tre rekomendas eterreton anta\305\255 ol Wi"
-   "-Fi por pli fidinda konekto. Noto: \305\235an\304\235i \304\211i tiujn agordojn bezonas restarti"
-   "gon de RetroArch.",
    "Elekti la maksimumaj konektoj uzotaj en via medio.",
-   "",
    "Adreso IP a\305\255 gastiga nomo de servilo.",
    "Konfiguri agordojn pri kunhava\304\265o de reto SMB.",
-   "Nomo de la reta kunhaviga\304\265o, al kiu aliri.",
-   "Subdosierujo en la kunhaviga\304\265o.",
    "Elekti la defa\305\255ltan tempolimon je sekundoj.",
-   "Uzantnomo por a\305\255tentokontrolo.",
-   "Nomo de laborgrupo a\305\255 domajno.",
 #endif
    "Ordigi konservdosieroj en dosierujojn nomitaj la\305\255 la dosierujoj, en kiu la enhavo estas l"
    "okita.",
@@ -8356,8 +8337,6 @@ static const struct
    "nioj (akiritaj de la plej supro de la ekrano). Povus enigi skaladajn artefaktojn.",
    "Kapti la bildon post filtriloj (sed ne ombrigiloj) estas aplikitaj. La videa\304\265o aspektos "
    "\304\235uste kiel tio, kion vi vidas en via ekrano.",
-   "Vertikala ofteco de aktualigo de via ekrano. Uzata por kalkuli \304\235ustan oftecon de a\305"
-   "\255dia enigo. \304\210i tio estos ignorata se \"Fadenigita video\" estas ebligita.",
    "La fidela pritaksita ofteco de aktualigo de la ekrano je Hz.",
    "La ofteco de aktualigo la\305\255 raportite de la ekrana pelilo.",
 #ifdef HAVE_ODROIDGO2
@@ -8432,8 +8411,6 @@ static const struct
    "iam rulante, ekzemple, enhavon de 30 fps en ekrano de 60 Hz, a\305\255 enhavon de 60 fps en ekra"
    "no de 120 Hz.",
    "\305\234an\304\235i agordojn pri videa sinkronigo.",
-   "Plibonigas rendimenton kontra\305\255 atendotempo kaj videa \"mikrobalbutado\". Uzu \304\235in n"
-   "ur se plena rapideco ne povas esti atingita alikaze.",
    "Provi plibonigi rendimenton uzante argumentajn bufrojn de Metal. Kelkaj kernoj povas bezoni \304"
    "\211i tion. \304\210i tio povas \"rompi\" kelkajn ombrigilojn, \304\211efe en kadukaj aparataroj"
    " a\305\255 malnovaj versioj de operaciumoj.",
@@ -8575,6 +8552,7 @@ static const struct
    "\304\210i tiu ludo havas neniujn akirojn.",
    "Luda \305\235argo de RetroAchievements malsukcesis: %s",
    "RetroAchievements: Ne povis identigi ludon.",
+   "Malfacilega",
    "Malfacilega re\304\235imo de akiroj \305\235an\304\235ita de gastiganto.",
    "Konservostato estis \305\235argita. Malfacilega re\304\235imo de akiroj estis malebligita por la"
    " kuranta sesio.",
@@ -9080,7 +9058,7 @@ static const struct
  * compiler that pads this struct fails here instead of
  * misindexing at runtime. */
 typedef char msg_hash_eo_blob_check[
-      (sizeof(msg_hash_eo_blob) == (172867u
+      (sizeof(msg_hash_eo_blob) == (172566u
 #ifdef ANDROID
        + 312u
 #endif
@@ -9214,7 +9192,6 @@ typedef char msg_hash_eo_blob_check[
        + 20u
        + 25u
        + 20u
-       + 25u
        + 17u
        + 17u
        + 18u
@@ -9400,16 +9377,10 @@ typedef char msg_hash_eo_blob_check[
        + 35u
        + 49u
        + 57u
-       + 180u
        + 51u
-       + 1u
        + 39u
        + 47u
-       + 44u
-       + 33u
        + 45u
-       + 32u
-       + 32u
 #endif
 #ifdef HAVE_LAKKA
        + 42u
@@ -9742,7 +9713,6 @@ static const uint32_t msg_hash_eo_ids[] =
    (uint32_t)MENU_ENUM_LABEL_VALUE_APPICON_SETTINGS,
    (uint32_t)MENU_ENUM_LABEL_VALUE_ASSETS_DIRECTORY,
    (uint32_t)MENU_ENUM_LABEL_VALUE_AUDIO_ASIO_CONTROL_PANEL,
-   (uint32_t)MENU_ENUM_LABEL_VALUE_AUDIO_BLOCK_FRAMES,
    (uint32_t)MENU_ENUM_LABEL_VALUE_AUDIO_DEVICE,
    (uint32_t)MENU_ENUM_LABEL_VALUE_AUDIO_DRIVER,
    (uint32_t)MENU_ENUM_LABEL_VALUE_AUDIO_DSP_PLUGIN,
@@ -10928,7 +10898,6 @@ static const uint32_t msg_hash_eo_ids[] =
    (uint32_t)MENU_ENUM_LABEL_VALUE_OZONE_THUMBNAIL_SCALE_FACTOR,
    (uint32_t)MENU_ENUM_LABEL_VALUE_OZONE_TRUNCATE_PLAYLIST_NAME,
    (uint32_t)MENU_ENUM_LABEL_VALUE_PAL60_ENABLE,
-   (uint32_t)MENU_ENUM_LABEL_VALUE_PARENT_DIRECTORY,
    (uint32_t)MENU_ENUM_LABEL_VALUE_PAUSE_LIBRETRO,
    (uint32_t)MENU_ENUM_LABEL_VALUE_PAUSE_NONACTIVE,
    (uint32_t)MENU_ENUM_LABEL_VALUE_PAUSE_ON_DISCONNECT,
@@ -11054,7 +11023,6 @@ static const uint32_t msg_hash_eo_ids[] =
    (uint32_t)MENU_ENUM_LABEL_VALUE_QT_MENU_FILE_UNLOAD_CORE,
    (uint32_t)MENU_ENUM_LABEL_VALUE_QT_MENU_HELP,
    (uint32_t)MENU_ENUM_LABEL_VALUE_QT_MENU_HELP_ABOUT,
-   (uint32_t)MENU_ENUM_LABEL_VALUE_QT_MENU_HELP_ABOUT_CONTRIBUTORS,
    (uint32_t)MENU_ENUM_LABEL_VALUE_QT_MENU_HELP_DOCUMENTATION,
    (uint32_t)MENU_ENUM_LABEL_VALUE_QT_MENU_SEARCH_CLEAR,
    (uint32_t)MENU_ENUM_LABEL_VALUE_QT_MENU_TOOLS,
@@ -11443,7 +11411,6 @@ static const uint32_t msg_hash_eo_ids[] =
    (uint32_t)MENU_ENUM_LABEL_VALUE_SMB_CLIENT_SETTINGS,
    (uint32_t)MENU_ENUM_LABEL_VALUE_SMB_CLIENT_SHARE,
    (uint32_t)MENU_ENUM_LABEL_VALUE_SMB_CLIENT_SMB_SHARE,
-   (uint32_t)MENU_ENUM_LABEL_VALUE_SMB_CLIENT_SUBDIR,
    (uint32_t)MENU_ENUM_LABEL_VALUE_SMB_CLIENT_TIMEOUT,
    (uint32_t)MENU_ENUM_LABEL_VALUE_SMB_CLIENT_USERNAME,
    (uint32_t)MENU_ENUM_LABEL_VALUE_SMB_CLIENT_WORKGROUP,
@@ -11512,6 +11479,7 @@ static const uint32_t msg_hash_eo_ids[] =
    (uint32_t)MENU_ENUM_LABEL_VALUE_SYSTEM_INFO_FRONTEND_OS,
    (uint32_t)MENU_ENUM_LABEL_VALUE_SYSTEM_INFO_GIT_VERSION,
    (uint32_t)MENU_ENUM_LABEL_VALUE_SYSTEM_INFO_LAKKA_VERSION,
+   (uint32_t)MENU_ENUM_LABEL_VALUE_SYSTEM_INFO_PACING,
    (uint32_t)MENU_ENUM_LABEL_VALUE_SYSTEM_INFO_POWER_SOURCE,
    (uint32_t)MENU_ENUM_LABEL_VALUE_SYSTEM_INFO_POWER_SOURCE_CHARGED,
    (uint32_t)MENU_ENUM_LABEL_VALUE_SYSTEM_INFO_POWER_SOURCE_CHARGING,
@@ -12854,16 +12822,10 @@ static const uint32_t msg_hash_eo_ids[] =
 #ifdef HAVE_SMBCLIENT
    (uint32_t)MENU_ENUM_SUBLABEL_SMB_CLIENT_AUTH_MODE,
    (uint32_t)MENU_ENUM_SUBLABEL_SMB_CLIENT_BROWSE,
-   (uint32_t)MENU_ENUM_SUBLABEL_SMB_CLIENT_ENABLE,
    (uint32_t)MENU_ENUM_SUBLABEL_SMB_CLIENT_NUM_CONTEXTS,
-   (uint32_t)MENU_ENUM_SUBLABEL_SMB_CLIENT_PASSWORD,
    (uint32_t)MENU_ENUM_SUBLABEL_SMB_CLIENT_SERVER,
    (uint32_t)MENU_ENUM_SUBLABEL_SMB_CLIENT_SETTINGS,
-   (uint32_t)MENU_ENUM_SUBLABEL_SMB_CLIENT_SHARE,
-   (uint32_t)MENU_ENUM_SUBLABEL_SMB_CLIENT_SUBDIR,
    (uint32_t)MENU_ENUM_SUBLABEL_SMB_CLIENT_TIMEOUT,
-   (uint32_t)MENU_ENUM_SUBLABEL_SMB_CLIENT_USERNAME,
-   (uint32_t)MENU_ENUM_SUBLABEL_SMB_CLIENT_WORKGROUP,
 #endif
    (uint32_t)MENU_ENUM_SUBLABEL_SORT_SAVEFILES_BY_CONTENT_ENABLE,
    (uint32_t)MENU_ENUM_SUBLABEL_SORT_SAVEFILES_ENABLE,
@@ -13007,7 +12969,6 @@ static const uint32_t msg_hash_eo_ids[] =
    (uint32_t)MENU_ENUM_SUBLABEL_VIDEO_OVERSCAN_CORRECTION_BOTTOM,
    (uint32_t)MENU_ENUM_SUBLABEL_VIDEO_OVERSCAN_CORRECTION_TOP,
    (uint32_t)MENU_ENUM_SUBLABEL_VIDEO_POST_FILTER_RECORD,
-   (uint32_t)MENU_ENUM_SUBLABEL_VIDEO_REFRESH_RATE,
    (uint32_t)MENU_ENUM_SUBLABEL_VIDEO_REFRESH_RATE_AUTO,
    (uint32_t)MENU_ENUM_SUBLABEL_VIDEO_REFRESH_RATE_POLLED,
 #ifdef HAVE_ODROIDGO2
@@ -13050,7 +13011,6 @@ static const uint32_t msg_hash_eo_ids[] =
    (uint32_t)MENU_ENUM_SUBLABEL_VIDEO_SWAPCHAIN_BIT_DEPTH,
    (uint32_t)MENU_ENUM_SUBLABEL_VIDEO_SWAP_INTERVAL,
    (uint32_t)MENU_ENUM_SUBLABEL_VIDEO_SYNCHRONIZATION_SETTINGS,
-   (uint32_t)MENU_ENUM_SUBLABEL_VIDEO_THREADED,
    (uint32_t)MENU_ENUM_SUBLABEL_VIDEO_USE_METAL_ARG_BUFFERS,
 #if defined(RARCH_MOBILE)
    (uint32_t)MENU_ENUM_SUBLABEL_VIDEO_VIEWPORT_BIAS_PORTRAIT_X,
@@ -13168,6 +13128,7 @@ static const uint32_t msg_hash_eo_ids[] =
    (uint32_t)MSG_CHEEVOS_GAME_HAS_NO_ACHIEVEMENTS,
    (uint32_t)MSG_CHEEVOS_GAME_LOAD_FAILED,
    (uint32_t)MSG_CHEEVOS_GAME_NOT_IDENTIFIED,
+   (uint32_t)MSG_CHEEVOS_HARDCORE_MODE,
    (uint32_t)MSG_CHEEVOS_HARDCORE_MODE_CHANGED_BY_HOST,
    (uint32_t)MSG_CHEEVOS_HARDCORE_MODE_DISABLED,
    (uint32_t)MSG_CHEEVOS_HARDCORE_MODE_DISABLED_CHEAT,

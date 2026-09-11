@@ -30,6 +30,9 @@
 
 #define VFS_FRONTEND
 #include <retro_environment.h>
+#ifdef __MACH__
+#include <TargetConditionals.h>
+#endif
 
 #define CINTERFACE
 
@@ -113,10 +116,6 @@ CONSOLE EXTENSIONS
 ============================================================ */
 #ifdef RARCH_CONSOLE
 
-#ifdef HW_DOL
-#include "../memory/ngc/ssaram.c"
-#endif
-
 #ifdef INTERNAL_LIBOGC
 #include "../wii/libogc/libfat/cache.c"
 #include "../wii/libogc/libfat/directory.c"
@@ -149,7 +148,7 @@ ARCHIVE FILE
 #include "../libretro-common/file/archive_file_7z.c"
 #endif
 
-#if defined(HAVE_ZSTD) || defined(HAVE_RZSTD)
+#ifdef HAVE_RZSTD
 #include "../libretro-common/file/archive_file_zstd.c"
 #endif
 
@@ -162,6 +161,7 @@ COMPRESSION
 #include "../libretro-common/encodings/encoding_deflate.c"
 #ifdef HAVE_RZSTD
 #include "../libretro-common/encodings/encoding_rzstd.c"
+#include "../libretro-common/streams/trans_stream_rzstd.c"
 #endif
 #include "../libretro-common/streams/trans_stream_deflate.c"
 #include "../libretro-common/streams/rzip_stream.c"
@@ -213,11 +213,10 @@ ACHIEVEMENTS
 #endif
 
 /* rcheevos doesn't actually spawn and manage threads, RC_NO_THREADS
- * simply disables the mutexes that provide thread safety. */
+ * simply disables the mutexes that provide thread safety. rc_compat
+ * carries its own native mutexes for GEKKO (recursive LWP) and 3DS
+ * (RecursiveLock), so threaded builds keep their locks there too. */
 #if !defined(HAVE_THREADS)
-#define RC_NO_THREADS 1
-#elif defined(GEKKO) || defined(_3DS)
- /* Gekko (Wii) and 3DS use custom pthread wrappers (see rthreads.c) */
 #define RC_NO_THREADS 1
 #endif
 #define RC_CLIENT_SUPPORTS_HASH 1
@@ -227,9 +226,10 @@ ACHIEVEMENTS
 #include "../cheevos/cheevos.c"
 #include "../cheevos/cheevos_client.c"
 #include "../cheevos/cheevos_menu.c"
+#include "../cheevos/cheevos_badge.c"
 
 #if defined(HAVE_CHEEVOS_RVZ)
-#if defined(HAVE_ZSTD) || defined(HAVE_RZSTD)
+#ifdef HAVE_RZSTD
 #include "../cheevos/cheevos_rvz.c"
 #endif
 #endif
@@ -268,9 +268,7 @@ ACHIEVEMENTS
 /*============================================================
 MD5
 ============================================================ */
-#ifndef __APPLE__
 #include "../libretro-common/utils/md5.c"
-#endif
 
 /*============================================================
 CHEATS
@@ -410,12 +408,32 @@ VIDEO SHADERS
 
 #ifdef HAVE_SLANG
 #include "../gfx/drivers_shader/glslang_util.c"
+#include "../gfx/drivers_shader/slang_cache.c"
+#include "../gfx/drivers_shader/slang_process.c"
 #endif
 
-/* Must mirror the guard on shader_gl3.cpp in griffin_cpp.cpp exactly:
+/* Must mirror the guard this file carried in griffin_cpp.cpp exactly:
+ * shader_vulkan.c calls vulkan_common.c and the Vulkan symbol wrapper,
+ * neither of which is in the build unless HAVE_VULKAN is set.  HAVE_SLANG
+ * alone is a real configuration (MSVC lanes ship D3D + slang without
+ * Vulkan) and compiling this file there produces unresolved externals at
+ * link time, not a compile error. */
+#if defined(HAVE_VULKAN) && defined(HAVE_SLANG)
+#include "../gfx/drivers_shader/shader_vulkan.c"
+#endif
+
+/* Must mirror the guard on shader_gl3.c in griffin_cpp.cpp exactly:
  * that is the only consumer of spirv_opengl_lower(). */
 #if defined(HAVE_OPENGL_CORE) && defined(HAVE_SLANG)
 #include "../gfx/drivers_shader/spirv_opengl.c"
+#endif
+
+/* Guard copied verbatim from the one this file carried in
+ * griffin_cpp.cpp; shader_gl3.c calls the gl3 driver's helpers and
+ * spirv_opengl_lower(), both of which are inside the same pair of
+ * defines. */
+#if defined(HAVE_OPENGL_CORE) && defined(HAVE_SLANG)
+#include "../gfx/drivers_shader/shader_gl3.c"
 #endif
 
 #ifdef HAVE_CG
@@ -468,6 +486,7 @@ VIDEO IMAGE
 #include "../libretro-common/formats/png/rpng.c"
 #include "../libretro-common/formats/png/rpng_apng.c"
 #include "../libretro-common/formats/png/rpng_encode.c"
+#include "../libretro-common/file/rpng_file.c"
 #endif
 #ifdef HAVE_RJPEG
 #include "../libretro-common/formats/jpeg/rjpeg.c"
@@ -514,6 +533,26 @@ VIDEO IMAGE
 #endif
 
 #include "../libretro-common/formats/bmp/rbmp_encode.c"
+#include "../libretro-common/file/rbmp_file.c"
+
+#ifdef HAVE_RAC3
+#include "../libretro-common/formats/ac3/rac3_frame.c"
+#include "../libretro-common/formats/ac3/rac3_decode.c"
+#include "../libretro-common/formats/ac3/rac3_encode.c"
+#include "../libretro-common/formats/iec61937/iec61937.c"
+#endif
+
+#ifdef HAVE_RLPCM
+#include "../libretro-common/formats/lpcm/rlpcm.c"
+#endif
+
+#ifdef HAVE_RDTS
+#include "../libretro-common/formats/dts/rdts.c"
+#endif
+
+#if defined(HAVE_RDTS) || defined(HAVE_RAC3)
+#include "../audio/audio_bitstream.c"
+#endif
 
 #ifdef HAVE_RWAV
 #include "../libretro-common/formats/wav/rwav.c"
@@ -546,6 +585,7 @@ VIDEO DRIVER
 
 #if defined(HAVE_D3D11)
 #include "../gfx/drivers/d3d11.c"
+#include "../gfx/common/d3d11_deferred_proxy.c"
 #endif
 
 #if defined(HAVE_D3D12)
@@ -579,6 +619,7 @@ VIDEO DRIVER
 #ifdef HAVE_SDL2
 #include "../gfx/drivers/sdl2_gfx.c"
 #include "../gfx/common/sdl2_common.c"
+#include "../gfx/display_servers/dispserv_sdl2.c"
 #endif
 
 #if defined(DINGUX) && defined(HAVE_SDL_DINGUX)
@@ -814,7 +855,7 @@ INPUT
 #include "../deps/libShake/src/common/error.c"
 #include "../deps/libShake/src/common/helpers.c"
 #include "../deps/libShake/src/common/presets.c"
-#if defined(OSX)
+#if TARGET_OS_OSX
 #include "../deps/libShake/src/osx/shake.c"
 #elif defined(__linux__) || (defined(BSD) && !defined(__MACH__))
 #include "../deps/libShake/src/linux/shake.c"
@@ -952,6 +993,8 @@ RSOUND
 AUDIO
 ============================================================ */
 #include "../audio/audio_driver.c"
+#include "../audio/audio_upmix.c"
+#include "../audio/audio_binaural.c"
 #if defined(__PS3__) || defined (__PSL1GHT__)
 #include "../audio/drivers/ps3_audio.c"
 #elif defined(XENON)
@@ -969,9 +1012,6 @@ AUDIO
 #elif defined(_3DS)
 #include "../audio/drivers/ctr_csnd_audio.c"
 #include "../audio/drivers/ctr_dsp_audio.c"
-#ifdef HAVE_THREADS
-#include "../audio/drivers/ctr_dsp_thread_audio.c"
-#endif
 #endif
 
 #ifdef HAVE_XAUDIO
@@ -983,6 +1023,8 @@ AUDIO
 #include "../input/drivers/sdl3_input.c"
 #include "../gfx/drivers/sdl3_gfx.c"
 #include "../gfx/common/sdl3_common.c"
+#include "../gfx/display_servers/dispserv_sdl3.c"
+#include "../audio/drivers/sdl3_audio.c"
 #if defined(HAVE_OPENGL) || defined(HAVE_OPENGL1) || defined(HAVE_OPENGL_CORE) || defined(HAVE_OPENGLES)
 #include "../gfx/drivers_context/sdl3_gl_ctx.c"
 #endif
@@ -1022,8 +1064,9 @@ AUDIO
 #endif
 #endif
 
-#ifdef HAVE_TINYALSA
-#include "../audio/drivers/tinyalsa.c"
+#if defined(HAVE_TINYALSA) && !defined(HAVE_ALSA)
+/* Both drivers are in this file; with HAVE_ALSA it came in above. */
+#include "../audio/drivers/alsa.c"
 #endif
 
 #ifdef HAVE_PULSE
@@ -1058,12 +1101,24 @@ MIDI
 /*============================================================
 DRIVERS
 ============================================================ */
-#ifdef HAVE_CRTSWITCHRES
+#ifdef HAVE_MODELINE
+#include "../gfx/modeline/modeline_core.c"
+#include "../gfx/modeline/modeline_monitor.c"
+#include "../gfx/modeline/modeline_list.c"
+#include "../gfx/modeline/modeline_ini.c"
+#include "../gfx/modeline/modeline_edid.c"
 #include "../gfx/video_crt_switch.c"
+#ifdef _WIN32
+#include "../gfx/display_servers/win32_modeline_resync.c"
+#include "../gfx/display_servers/win32_modeline_adl.c"
+#include "../gfx/display_servers/win32_modeline_ati.c"
+#include "../gfx/display_servers/win32_modeline_pstrip.c"
+#endif
 #endif
 #include "../gfx/gfx_animation.c"
 #include "../gfx/gfx_display.c"
 #include "../gfx/gfx_thumbnail.c"
+#include "../gfx/gfx_anim_preview.c"
 
 /* rflac is used by the audio mixer (HAVE_RFLAC) and by the CHD FLAC
  * decoder in libchdr (HAVE_CHD). Include its implementation once, ahead
@@ -1183,8 +1238,10 @@ FILE
 #include "../libretro-common/lists/dir_list.c"
 #include "../libretro-common/lists/string_list.c"
 #include "../libretro-common/lists/nested_list.c"
+#include "../libretro-common/memory/mempool.c"
 #include "../libretro-common/lists/file_list.c"
 #include "../libretro-common/file/retro_dirent.c"
+#include "../libretro-common/file/file_watch.c"
 #include "../libretro-common/streams/file_stream.c"
 #include "../libretro-common/streams/file_stream_transforms.c"
 #include "../libretro-common/streams/interface_stream.c"
@@ -1205,6 +1262,7 @@ FILE
 #include "../libretro-common/vfs/vfs_implementation_saf.c"
 #endif
 
+#include "../libretro-common/string/rstrtod.c"
 #include "../libretro-common/string/stdstring.c"
 #if defined(__linux__)
 #endif
@@ -1294,6 +1352,7 @@ UI
 ============================================================ */
 #if defined(_WIN32) && !defined(_XBOX) && !defined(__WINRT__)
 #include "../ui/drivers/ui_win32.c"
+#include "../ui/drivers/ui_win32_companion.c"
 #endif
 
 /*============================================================
@@ -1314,6 +1373,11 @@ RETROARCH
 #endif
 #include "../command.c"
 #include "../ui/ui_companion_driver.c"
+#ifdef HAVE_COMPANION_WIMP
+#include "../ui/companion/companion_core.c"
+#include "../ui/companion/companion_thumbs.c"
+#include "../ui/companion/companion_dock.c"
+#endif
 #include "../libretro-common/queues/task_queue.c"
 
 #include "../msg_hash.c"
@@ -1364,6 +1428,7 @@ THREAD
 
 #include "../libretro-common/rthreads/rthreads.c"
 #include "../gfx/video_thread_wrapper.c"
+#include "../gfx/video_thread_hw.c"
 #include "../audio/audio_thread_wrapper.c"
 #endif
 
@@ -1417,6 +1482,7 @@ DATA RUNLOOP
 #include "../tasks/task_content_prefetch.c"
 #include "../tasks/task_image.c"
 #include "../tasks/task_file_transfer.c"
+#include "../tasks/task_nbio_slice.c"
 #include "../tasks/task_playlist_manager.c"
 #include "../tasks/task_core_backup.c"
 #ifdef HAVE_TRANSLATE
@@ -1465,6 +1531,7 @@ MENU
 #endif
 
 #ifdef HAVE_MENU
+#include "../menu/menu_str.c"
 #include "../menu/menu_driver.c"
 #include "../menu/menu_setting.c"
 #if defined(HAVE_MATERIALUI) || defined(HAVE_XMB) || defined(HAVE_OZONE)
@@ -1485,6 +1552,7 @@ MENU
 #include "../menu/cbs/menu_cbs_label.c"
 #include "../menu/cbs/menu_cbs_sublabel.c"
 #include "../menu/menu_displaylist.c"
+#include "../menu/menu_dirwalk.c"
 #include "../menu/menu_contentless_cores.c"
 #ifdef HAVE_LIBRETRODB
 #include "../menu/menu_explore.c"
@@ -1547,7 +1615,7 @@ DEPENDENCIES
 #define GRIFFIN_HAVE_R7Z_LZMA 1
 #include "../libretro-common/formats/7z/r7z_lzma.c"
 
-#ifdef HAVE_ZSTD
+#ifdef HAVE_RZSTD
 #include "../libretro-common/formats/libchdr/libchdr_zstd.c"
 #endif
 #endif  /* !HAVE_RCHD */
@@ -1567,32 +1635,6 @@ DEPENDENCIES
 #include "../libretro-common/formats/7z/r7z_filters.c"
 #endif
 
-#ifdef HAVE_ZSTD
-#if (DEBUGLEVEL>=2)
-#include "../deps/zstd/lib/common/debug.c"
-#endif
-#include "../deps/zstd/lib/common/entropy_common.c"
-#include "../deps/zstd/lib/common/error_private.c"
-#include "../deps/zstd/lib/common/fse_decompress.c"
-#include "../deps/zstd/lib/common/zstd_common.c"
-#include "../deps/zstd/lib/common/xxhash.c"
-#include "../deps/zstd/lib/compress/fse_compress.c"
-#include "../deps/zstd/lib/compress/hist.c"
-#include "../deps/zstd/lib/compress/huf_compress.c"
-#include "../deps/zstd/lib/compress/zstd_compress.c"
-#include "../deps/zstd/lib/compress/zstd_compress_literals.c"
-#include "../deps/zstd/lib/compress/zstd_compress_sequences.c"
-#include "../deps/zstd/lib/compress/zstd_compress_superblock.c"
-#include "../deps/zstd/lib/compress/zstd_double_fast.c"
-#include "../deps/zstd/lib/compress/zstd_fast.c"
-#include "../deps/zstd/lib/compress/zstd_lazy.c"
-#include "../deps/zstd/lib/compress/zstd_ldm.c"
-#include "../deps/zstd/lib/compress/zstd_opt.c"
-#include "../deps/zstd/lib/decompress/huf_decompress.c"
-#include "../deps/zstd/lib/decompress/zstd_ddict.c"
-#include "../deps/zstd/lib/decompress/zstd_decompress.c"
-#include "../deps/zstd/lib/decompress/zstd_decompress_block.c"
-#endif
 
 #ifdef WANT_LIBFAT
 #include "../deps/libfat/cache.c"
@@ -1693,6 +1735,7 @@ SSL
 #include "../deps/mbedtls/ripemd160.c"
 #include "../deps/mbedtls/rsa.c"
 #include "../deps/mbedtls/sha1.c"
+#include "../deps/mbedtls/sha_alt.c"
 #include "../deps/mbedtls/sha256.c"
 #include "../deps/mbedtls/sha512.c"
 #include "../deps/mbedtls/threading.c"
@@ -1741,7 +1784,7 @@ DISK CONTROL INTERFACE
 /*============================================================
 MISC FILE FORMATS
 ============================================================ */
-#include "../libretro-common/formats/m3u/m3u_file.c"
+#include "../libretro-common/formats/m3u/rm3u.c"
 
 /*============================================================
 TIME
@@ -1827,7 +1870,6 @@ SMB CLIENT
 #include "../deps/libsmb2/lib/krb5-wrapper.c"
 #include "../deps/libsmb2/lib/libsmb2.c"
 #include "../deps/libsmb2/lib/md4c.c"
-#include "../deps/libsmb2/lib/md5.c"
 #include "../deps/libsmb2/lib/ntlmssp.c"
 #include "../deps/libsmb2/lib/pdu.c"
 #include "../deps/libsmb2/lib/sha1.c"

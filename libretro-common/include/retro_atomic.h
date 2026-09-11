@@ -29,7 +29,7 @@
 /* Minimal portable atomic operations for SPSC patterns.
  *
  * This header consolidates the ad-hoc atomic shims previously duplicated
- * in audio/drivers/{coreaudio,coreaudio3,xaudio,opensl}.c, audio/common/
+ * in audio/drivers/{coreaudio,xaudio,opensl}.c, audio/common/
  * mmdevice_common.c and gfx/gfx_thumbnail.c.  The surface is intentionally
  * narrow: load, store, fetch_add, fetch_sub, fetch_or, fetch_and, plus
  * inc/dec convenience wrappers.  Everything is on plain machine words
@@ -49,6 +49,11 @@
  * tags for every backend:
  *
  *   retro_atomic_load_acquire   - acquire load   (pairs with release store)
+ *   retro_atomic_load_relaxed_size - relaxed load of a size_t; no ordering.
+ *                                 For a thread reading a counter that
+ *                                 only it writes (e.g. an SPSC producer
+ *                                 reading its own head).  Not offered for
+ *                                 int: no caller needs it yet.
  *   retro_atomic_store_release  - release store  (pairs with acquire load)
  *   retro_atomic_fetch_add      - acq_rel RMW
  *   retro_atomic_fetch_sub      - acq_rel RMW
@@ -57,6 +62,7 @@
  *   retro_atomic_inc / dec      - acq_rel RMW, return void
  *   retro_atomic_exchange_int   - acq_rel swap, returns old value
  *   retro_atomic_cas_int        - strong CAS, non-zero on success
+ *   retro_atomic_cas_ptr        - strong CAS on a pointer, non-zero on success
  *   retro_atomic_*_ptr          - pointer-width load/store/exchange
  *   retro_atomic_thread_fence_* - acquire / release fences
  *   (extended ops absent on the volatile fallback; gate with
@@ -125,8 +131,12 @@
  *   Use when you have a working alternative (mutex-based, locked,
  *   slock_t / scond_t, fifo_queue with a lock around it) that you
  *   would happily fall back to on a target without real atomics.
- *   This is the same shape as audio/drivers/coreaudio.c's
- *   RARCH_COREAUDIO_LEGACY split.
+ *   audio/drivers/coreaudio.c once carried this split against its
+ *   oldest toolchains and no longer needs to: every Apple toolchain
+ *   it builds on gets a real backend here (OSAtomic on the oldest),
+ *   so it uses the atomics unconditionally, as Pattern 3 does but
+ *   for correctness rather than tolerance. Reach for Pattern 1 when
+ *   a target you build for genuinely lands in the volatile fallback.
  *
  *     #include <retro_atomic.h>
  *     #if defined(RETRO_ATOMIC_LOCK_FREE)
@@ -386,6 +396,8 @@ typedef atomic_size_t retro_atomic_size_t;
 
 #define retro_atomic_load_acquire_size(p) \
    atomic_load_explicit((p), memory_order_acquire)
+#define retro_atomic_load_relaxed_size(p) \
+   atomic_load_explicit((p), memory_order_relaxed)
 #define retro_atomic_store_release_size(p, v) \
    atomic_store_explicit((p), (v), memory_order_release)
 #define retro_atomic_fetch_add_size(p, v) \
@@ -443,6 +455,8 @@ typedef std::atomic<std::size_t> retro_atomic_size_t;
 
 #define retro_atomic_load_acquire_size(p) \
    std::atomic_load_explicit((p), std::memory_order_acquire)
+#define retro_atomic_load_relaxed_size(p) \
+   std::atomic_load_explicit((p), std::memory_order_relaxed)
 #define retro_atomic_store_release_size(p, v) \
    std::atomic_store_explicit((p), (std::size_t)(v), std::memory_order_release)
 #define retro_atomic_fetch_add_size(p, v) \
@@ -477,6 +491,8 @@ typedef size_t retro_atomic_size_t;
 
 #define retro_atomic_load_acquire_size(p) \
    __atomic_load_n((p), __ATOMIC_ACQUIRE)
+#define retro_atomic_load_relaxed_size(p) \
+   __atomic_load_n((p), __ATOMIC_RELAXED)
 #define retro_atomic_store_release_size(p, v) \
    __atomic_store_n((p), (v), __ATOMIC_RELEASE)
 #define retro_atomic_fetch_add_size(p, v) \
@@ -615,6 +631,12 @@ static INLINE LONG retro_atomic_fetch_and_int_cas(LONG volatile *p, LONG v)
  * needs seq_cst, they can pair this with an additional load_acquire
  * on the same variable. */
 
+/* Relaxed load: retro_atomic_size_t is volatile LONG_PTR, so a plain
+ * read is an aligned native-width volatile load, which MSVC guarantees
+ * is atomic (no tearing) on every architecture it targets.  This is
+ * the one load here that is not a locked RMW. */
+#define retro_atomic_load_relaxed_size(p) ((size_t)(*(p)))
+
 #if defined(_WIN64)
 #define retro_atomic_load_acquire_size(p) \
    ((size_t)InterlockedCompareExchangeAcquire64((LONGLONG volatile*)(p), 0, 0))
@@ -675,6 +697,11 @@ typedef volatile intptr_t retro_atomic_size_t;
 #define retro_atomic_fetch_and_int(p, v) \
    ((int)OSAtomicAnd32OrigBarrier((uint32_t)(v), (volatile uint32_t*)(p)))
 
+/* Relaxed load: aligned native-width volatile read, atomic on every
+ * Apple target (no tearing); unlike the barrier'd Add(0) above it is
+ * not an RMW. */
+#define retro_atomic_load_relaxed_size(p) ((size_t)(*(p)))
+
 #if defined(__LP64__)
 #define retro_atomic_load_acquire_size(p) \
    ((size_t)OSAtomicAdd64Barrier(0, (volatile int64_t*)(p)))
@@ -725,6 +752,8 @@ typedef volatile size_t retro_atomic_size_t;
 
 #define retro_atomic_load_acquire_size(p) \
    __sync_fetch_and_add((p), (size_t)0)
+/* Relaxed load: aligned volatile size_t read, no RMW. */
+#define retro_atomic_load_relaxed_size(p) (*(p))
 #define retro_atomic_store_release_size(p, v) \
    do { __sync_synchronize(); *(p) = (v); __sync_synchronize(); } while (0)
 #define retro_atomic_fetch_add_size(p, v) \
@@ -770,6 +799,7 @@ static INLINE int retro_atomic_fetch_and_int_fb(retro_atomic_int_t *p, int v)
 }
 
 #define retro_atomic_load_acquire_size(p)        (*(p))
+#define retro_atomic_load_relaxed_size(p)        (*(p))
 #define retro_atomic_store_release_size(p, v)    do { *(p) = (v); } while (0)
 #define retro_atomic_fetch_add_size(p, v)        ((*(p) += (v)) - (v))
 #define retro_atomic_fetch_sub_size(p, v)        ((*(p) -= (v)) + (v))
@@ -811,6 +841,14 @@ static INLINE int retro_atomic_cas_int_impl_(retro_atomic_int_t *p, int expected
    atomic_store_explicit((p), (v), memory_order_release)
 #define retro_atomic_exchange_ptr(p, v) \
    atomic_exchange_explicit((p), (v), memory_order_acq_rel)
+static INLINE int retro_atomic_cas_ptr_impl_(retro_atomic_ptr_t *p, void *expected, void *desired)
+{
+   void *e = expected;
+   return atomic_compare_exchange_strong_explicit(p, &e, desired,
+         memory_order_acq_rel, memory_order_acquire);
+}
+#define retro_atomic_cas_ptr(p, expected, desired) \
+   retro_atomic_cas_ptr_impl_((p), (expected), (desired))
 #define retro_atomic_thread_fence_acquire() \
    atomic_thread_fence(memory_order_acquire)
 #define retro_atomic_thread_fence_release() \
@@ -838,6 +876,14 @@ static INLINE int retro_atomic_cas_int_impl_(retro_atomic_int_t *p, int expected
    ((p)->store((v), std::memory_order_release))
 #define retro_atomic_exchange_ptr(p, v) \
    ((p)->exchange((v), std::memory_order_acq_rel))
+static INLINE int retro_atomic_cas_ptr_impl_(retro_atomic_ptr_t *p, void *expected, void *desired)
+{
+   void *e = expected;
+   return (int)p->compare_exchange_strong(e, desired,
+         std::memory_order_acq_rel, std::memory_order_acquire);
+}
+#define retro_atomic_cas_ptr(p, expected, desired) \
+   retro_atomic_cas_ptr_impl_((p), (expected), (desired))
 #define retro_atomic_thread_fence_acquire() \
    std::atomic_thread_fence(std::memory_order_acquire)
 #define retro_atomic_thread_fence_release() \
@@ -865,6 +911,14 @@ static INLINE int retro_atomic_cas_int_impl_(retro_atomic_int_t *p, int expected
    __atomic_store_n((p), (v), __ATOMIC_RELEASE)
 #define retro_atomic_exchange_ptr(p, v) \
    __atomic_exchange_n((p), (v), __ATOMIC_ACQ_REL)
+static INLINE int retro_atomic_cas_ptr_impl_(retro_atomic_ptr_t *p, void *expected, void *desired)
+{
+   void *e = expected;
+   return __atomic_compare_exchange_n(p, &e, desired, 0,
+         __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE);
+}
+#define retro_atomic_cas_ptr(p, expected, desired) \
+   retro_atomic_cas_ptr_impl_((p), (expected), (desired))
 #define retro_atomic_thread_fence_acquire() \
    __atomic_thread_fence(__ATOMIC_ACQUIRE)
 #define retro_atomic_thread_fence_release() \
@@ -892,6 +946,9 @@ static INLINE int retro_atomic_cas_int_impl_(retro_atomic_int_t *p, int expected
    ((void)InterlockedExchangePointer((void* volatile*)(p), (void*)(v)))
 #define retro_atomic_exchange_ptr(p, v) \
    InterlockedExchangePointer((void* volatile*)(p), (void*)(v))
+#define retro_atomic_cas_ptr(p, expected, desired) \
+   (InterlockedCompareExchangePointer((void* volatile*)(p), (void*)(desired), \
+         (void*)(expected)) == (void*)(expected))
 #define retro_atomic_thread_fence_acquire() MemoryBarrier()
 #define retro_atomic_thread_fence_release() MemoryBarrier()
 #define RETRO_ATOMIC_HAS_CAS 1
@@ -934,6 +991,8 @@ static INLINE void* retro_atomic_exchange_ptr_impl_(retro_atomic_ptr_t *p, void*
 }
 #define retro_atomic_exchange_ptr(p, v) \
    retro_atomic_exchange_ptr_impl_((p), (void*)(v))
+#define retro_atomic_cas_ptr(p, expected, desired) \
+   OSAtomicCompareAndSwapPtrBarrier((void*)(expected), (void*)(desired), (void* volatile*)(p))
 #define retro_atomic_thread_fence_acquire() OSMemoryBarrier()
 #define retro_atomic_thread_fence_release() OSMemoryBarrier()
 #define RETRO_ATOMIC_HAS_CAS 1
@@ -971,6 +1030,8 @@ static INLINE void* retro_atomic_exchange_ptr_impl_(retro_atomic_ptr_t *p, void*
 }
 #define retro_atomic_exchange_ptr(p, v) \
    retro_atomic_exchange_ptr_impl_((p), (void*)(v))
+#define retro_atomic_cas_ptr(p, expected, desired) \
+   __sync_bool_compare_and_swap((void* volatile*)(p), (void*)(expected), (void*)(desired))
 #define retro_atomic_thread_fence_acquire() __sync_synchronize()
 #define retro_atomic_thread_fence_release() __sync_synchronize()
 #define RETRO_ATOMIC_HAS_CAS 1
@@ -1077,23 +1138,64 @@ static INLINE int retro_atomic_cas_64_impl_(retro_atomic_64_t *p, int64_t expect
 
 #elif defined(RETRO_ATOMIC_BACKEND_MSVC)
 
+#if defined(_M_IX86) && (_MSC_VER < 1400)
+
+/* VS2003 and the OG Xbox XDK have neither the CMPXCHG8B intrinsic nor a
+ * kernel32 export behind the 64-bit Interlocked names, so there is no
+ * primitive to build on.  RETRO_ATOMIC_HAS_64 stays unset and callers
+ * take their gated fallback, as on old 32-bit __sync targets. */
+
+#else
+
+#if defined(_M_IX86) && !defined(NTDDI_VERSION) && \
+      (!defined(_WIN32_WINNT) || (_WIN32_WINNT < 0x0502))
+/* Pre-Vista SDKs (no NTDDI_VERSION) declare the 64-bit Interlocked forms
+ * only when _WIN32_WINNT >= 0x0502, and on 32-bit x86 there is no
+ * kernel32 export behind them in any case: the operation is the
+ * CMPXCHG8B intrinsic or nothing.  Reach for the intrinsic directly so
+ * the header's target-version macro plays no part in whether this
+ * compiles. */
+__int64 _InterlockedCompareExchange64(__int64 volatile*, __int64, __int64);
+#pragma intrinsic(_InterlockedCompareExchange64)
+#define RETRO_ATOMIC_MSVC_CMPX64_(p, d, e) \
+   _InterlockedCompareExchange64((__int64 volatile*)(p), (d), (e))
+static INLINE LONGLONG retro_atomic_msvc_xchg_64_(LONGLONG volatile *p,
+      LONGLONG v)
+{
+   LONGLONG old;
+   do
+   {
+      old = *p;
+   } while (RETRO_ATOMIC_MSVC_CMPX64_(p, v, old) != old);
+   return old;
+}
+#define RETRO_ATOMIC_MSVC_XCHG64_(p, v) \
+   retro_atomic_msvc_xchg_64_((p), (v))
+#else
+/* Interlocked 64-bit CAS exists on 32-bit x86 too (cmpxchg8b). */
+#define RETRO_ATOMIC_MSVC_CMPX64_(p, d, e) \
+   InterlockedCompareExchange64((volatile LONGLONG*)(p), (d), (e))
+#define RETRO_ATOMIC_MSVC_XCHG64_(p, v) \
+   InterlockedExchange64((volatile LONGLONG*)(p), (v))
+#endif
+
 typedef LONGLONG volatile retro_atomic_64_t;
 #define retro_atomic_64_init(p, v)     (*(p) = (v))
-/* Interlocked 64-bit CAS exists on 32-bit x86 too (cmpxchg8b). */
 #define retro_atomic_load_acquire_64(p) \
-   InterlockedCompareExchange64((volatile LONGLONG*)(p), 0, 0)
+   RETRO_ATOMIC_MSVC_CMPX64_((p), 0, 0)
 #define retro_atomic_store_release_64(p, v) \
-   ((void)InterlockedExchange64((volatile LONGLONG*)(p), (LONGLONG)(v)))
+   ((void)RETRO_ATOMIC_MSVC_XCHG64_((p), (LONGLONG)(v)))
 #define retro_atomic_exchange_64(p, v) \
-   InterlockedExchange64((volatile LONGLONG*)(p), (LONGLONG)(v))
+   RETRO_ATOMIC_MSVC_XCHG64_((p), (LONGLONG)(v))
 static INLINE int retro_atomic_cas_64_impl_(retro_atomic_64_t *p, LONGLONG expected, LONGLONG desired)
 {
-   return InterlockedCompareExchange64((volatile LONGLONG*)p, desired,
-         expected) == expected;
+   return RETRO_ATOMIC_MSVC_CMPX64_(p, desired, expected) == expected;
 }
 #define retro_atomic_cas_64(p, expected, desired) \
    retro_atomic_cas_64_impl_((p), (expected), (desired))
 #define RETRO_ATOMIC_HAS_64 1
+
+#endif /* !(_M_IX86 && _MSC_VER < 1400) */
 
 #elif defined(RETRO_ATOMIC_BACKEND_APPLE)
 

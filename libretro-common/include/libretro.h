@@ -1715,6 +1715,24 @@ enum retro_mod
 #define RETRO_ENVIRONMENT_GET_VFS_INTERFACE (45 | RETRO_ENVIRONMENT_EXPERIMENTAL)
 
 /**
+ * Returns a list of frontend-authorized filesystem locations.
+ *
+ * Paths returned by this call must be directly usable with the VFS interface,
+ * for example saf://... on Android.
+ *
+ * @param[out] data <tt>struct retro_vfs_authorized_locations *</tt>.
+ * The frontend owns the returned pointers. The core must copy strings
+ * if it needs to retain them.
+ * If \c data is \c NULL, the frontend should only return whether this
+ * environment callback is available.
+ *
+ * @return \c true if this environment call is available,
+ * \c false otherwise.
+ * @see RETRO_ENVIRONMENT_GET_VFS_INTERFACE
+ */
+#define RETRO_ENVIRONMENT_GET_VFS_AUTHORIZED_LOCATIONS (93 | RETRO_ENVIRONMENT_EXPERIMENTAL)
+
+/**
  * Returns an interface that the core can use
  * to set the state of any accessible device LEDs.
  *
@@ -2854,6 +2872,79 @@ enum retro_mod
 #define RETRO_ENVIRONMENT_GET_HDR_MAX_NITS (92 | RETRO_ENVIRONMENT_EXPERIMENTAL)
 
 /**
+ * Negotiates multi-channel audio output.
+ *
+ * The classic batch callbacks carry interleaved stereo. A core whose
+ * source has more channels - a console with discrete surround, a
+ * media player, an arcade board with a distinct rear pair - has had
+ * to fold them to two at the libretro boundary. This call hands the
+ * core a pair of batch entry points that take a frame of any of the
+ * layouts below, so the channels reach the frontend as they are;
+ * what happens to them then is the frontend's: sent discretely to a
+ * device that has those speakers, folded to stereo for one that does
+ * not, folded and re-expanded as the user's settings say.
+ *
+ * On success the frontend fills the supplied
+ * \c retro_audio_sample_multi_callback: \c batch_int16 always, and
+ * \c batch_float when it also answers \c true to
+ * \c RETRO_ENVIRONMENT_GET_AUDIO_SAMPLE_BATCH_FLOAT (a core wanting
+ * float should query that first; a NULL \c batch_float means int16
+ * only). Either function takes interleaved frames of \c channels
+ * samples, in the ascending-bit order of \c layout - front left,
+ * front right, front centre, LFE, back left, back right, ...
+ * - which is the order the WAVEFORMATEXTENSIBLE channel mask, ALSA,
+ * SDL and the WAV format use. \c channels must equal the number of
+ * bits set in \c layout. The return value has the meaning of
+ * \c retro_audio_sample_batch_t.
+ *
+ * Contract:
+ *  - Negotiate once, during \c retro_load_game(). The layout may
+ *    change from call to call (a game switching from stereo to 5.1),
+ *    but the core commits to one sample format for the loaded game,
+ *    as with the float call, and does not mix these entry points
+ *    with the classic ones.
+ *  - A layout with a bit the frontend does not know, or more than
+ *    eight channels, is refused: the call returns 0 frames. Cores
+ *    should use the \c RETRO_AUDIO_LAYOUT_ constants.
+ *  - The function pointers are owned by the frontend and remain
+ *    valid until \c retro_unload_game().
+ *  - Frontends that do not recognise this call return \c false; the
+ *    core keeps folding to stereo and using the classic callbacks.
+ *
+ * @param[out] data <tt>struct retro_audio_sample_multi_callback *</tt>.
+ * @return \c true if multi-channel output is supported, \c false otherwise.
+ * @see retro_audio_sample_multi_callback
+ * @see RETRO_AUDIO_SPEAKER_FRONT_LEFT
+ */
+#define RETRO_ENVIRONMENT_GET_AUDIO_SAMPLE_BATCH_MULTI (94 | RETRO_ENVIRONMENT_EXPERIMENTAL)
+
+/* Speaker positions, as bits of a layout mask; a frame's channels are
+ * interleaved in ascending bit order. The bits are those of the
+ * WAVEFORMATEXTENSIBLE channel mask. */
+#define RETRO_AUDIO_SPEAKER_FRONT_LEFT            0x001
+#define RETRO_AUDIO_SPEAKER_FRONT_RIGHT           0x002
+#define RETRO_AUDIO_SPEAKER_FRONT_CENTER          0x004
+#define RETRO_AUDIO_SPEAKER_LOW_FREQUENCY         0x008
+#define RETRO_AUDIO_SPEAKER_BACK_LEFT             0x010
+#define RETRO_AUDIO_SPEAKER_BACK_RIGHT            0x020
+#define RETRO_AUDIO_SPEAKER_FRONT_LEFT_OF_CENTER  0x040
+#define RETRO_AUDIO_SPEAKER_FRONT_RIGHT_OF_CENTER 0x080
+#define RETRO_AUDIO_SPEAKER_BACK_CENTER           0x100
+#define RETRO_AUDIO_SPEAKER_SIDE_LEFT             0x200
+#define RETRO_AUDIO_SPEAKER_SIDE_RIGHT            0x400
+
+/* The layouts a core is expected to use. Others are accepted where the
+ * frontend knows every bit. */
+#define RETRO_AUDIO_LAYOUT_MONO   (RETRO_AUDIO_SPEAKER_FRONT_CENTER)
+#define RETRO_AUDIO_LAYOUT_STEREO (RETRO_AUDIO_SPEAKER_FRONT_LEFT | RETRO_AUDIO_SPEAKER_FRONT_RIGHT)
+#define RETRO_AUDIO_LAYOUT_2_1    (RETRO_AUDIO_LAYOUT_STEREO | RETRO_AUDIO_SPEAKER_LOW_FREQUENCY)
+#define RETRO_AUDIO_LAYOUT_QUAD   (RETRO_AUDIO_LAYOUT_STEREO | RETRO_AUDIO_SPEAKER_BACK_LEFT | RETRO_AUDIO_SPEAKER_BACK_RIGHT)
+#define RETRO_AUDIO_LAYOUT_5_1    (RETRO_AUDIO_LAYOUT_QUAD | RETRO_AUDIO_SPEAKER_FRONT_CENTER | RETRO_AUDIO_SPEAKER_LOW_FREQUENCY)
+#define RETRO_AUDIO_LAYOUT_5_1_SIDE (RETRO_AUDIO_LAYOUT_STEREO | RETRO_AUDIO_SPEAKER_FRONT_CENTER | RETRO_AUDIO_SPEAKER_LOW_FREQUENCY \
+                                    | RETRO_AUDIO_SPEAKER_SIDE_LEFT | RETRO_AUDIO_SPEAKER_SIDE_RIGHT)
+#define RETRO_AUDIO_LAYOUT_7_1    (RETRO_AUDIO_LAYOUT_5_1 | RETRO_AUDIO_SPEAKER_SIDE_LEFT | RETRO_AUDIO_SPEAKER_SIDE_RIGHT)
+
+/**
  * Result of \c RETRO_ENVIRONMENT_GET_MEMORY_STATUS.
  *
  * Sizes are in bytes; a field the frontend cannot determine is left at 0.
@@ -2975,6 +3066,20 @@ struct retro_vfs_dir_handle;
  * The frontend should cache it or map it into memory.
  */
 #define RETRO_VFS_FILE_ACCESS_HINT_FREQUENT_ACCESS   (1 << 0)
+
+/**
+ * Indicates that the file will be read once, from start to finish,
+ * and then closed.
+ *
+ * No mapping or caching is wanted: the caller already keeps the bytes
+ * it asked for, so anything the frontend holds on to beyond the call
+ * is dead weight.  A frontend that buffers its reads may wish to skip
+ * doing so for such a stream, since a whole-file read gains nothing
+ * from being split across a buffer and copied twice.
+ *
+ * Only meaningful together with \c RETRO_VFS_FILE_ACCESS_READ.
+ */
+#define RETRO_VFS_FILE_ACCESS_HINT_SEQUENTIAL_BULK   (1 << 1)
 
 /** @} */
 
@@ -3411,6 +3516,33 @@ struct retro_vfs_interface_info
     * and must not be modified or freed by the core.
     * @since VFS API v1 */
    struct retro_vfs_interface *iface;
+};
+
+/**
+ * Represents a single frontend-authorized filesystem location.
+ *
+ * The \c path field must be directly usable through the frontend VFS
+ * interface, for example saf://... on Android.
+ *
+ * The frontend owns all returned pointers. Cores must copy strings if they
+ * need to retain them after the environment callback returns.
+ */
+struct retro_vfs_authorized_location
+{
+   const char *path;
+   const char *label;
+   unsigned flags;
+};
+
+/**
+ * Represents the list of frontend-authorized filesystem locations.
+ *
+ * This is returned by RETRO_ENVIRONMENT_GET_VFS_AUTHORIZED_LOCATIONS.
+ */
+struct retro_vfs_authorized_locations
+{
+   const struct retro_vfs_authorized_location *locations;
+   size_t count;
 };
 
 /** @} */
@@ -4538,6 +4670,52 @@ struct retro_log_callback
  * A10 lack them, for instance.
  */
 #define RETRO_SIMD_CRC32    (1 << 25)
+
+/**
+ * Indicates CPU support for hardware SHA-512 acceleration.
+ *
+ * On AArch64 this is FEAT_SHA512, optional from Armv8.1 and A64-only.
+ * On x86 it is the SHA512 instruction group enumerated by
+ * CPUID.(EAX=07H,ECX=1):EAX[0], which is separate from the SHA-NI
+ * instructions covering SHA-1 and SHA-256.
+ */
+#define RETRO_SIMD_SHA512   (1 << 26)
+
+/**
+ * Indicates CPU support for hardware SHA-1 acceleration.
+ *
+ * On AArch64 this is FEAT_SHA1; on x86 it is part of SHA-NI, which
+ * covers SHA-1 and SHA-256 in one CPUID bit and therefore always
+ * reports alongside \c RETRO_SIMD_SHA256 there.
+ */
+#define RETRO_SIMD_SHA1     (1 << 27)
+
+/**
+ * Indicates CPU support for hardware SHA-256 acceleration.
+ *
+ * On AArch64 this is FEAT_SHA256; on x86 it is the other half of
+ * SHA-NI. Separate from \c RETRO_SIMD_SHA1 because AArch64 enumerates
+ * the two independently.
+ */
+#define RETRO_SIMD_SHA256   (1 << 28)
+
+/**
+ * Indicates CPU support for the FMA3 fused multiply-add instructions.
+ *
+ * CPUID.(EAX=01H):ECX[12]. They operate on YMM state, so this reports
+ * only where the operating system preserves it, as \c RETRO_SIMD_AVX
+ * does.
+ */
+#define RETRO_SIMD_FMA3     (1 << 29)
+
+/**
+ * Indicates CPU support for the FMA4 fused multiply-add instructions.
+ *
+ * CPUID.(EAX=80000001H):ECX[16], an AMD extension dropped from Zen, and
+ * a different encoding from \c RETRO_SIMD_FMA3 rather than a superset
+ * of it. Gated on the same operating system state.
+ */
+#define RETRO_SIMD_FMA4     (1 << 30)
 
 /** @} */
 
@@ -7914,6 +8092,40 @@ struct retro_audio_sample_float_callback
    /* Set by the frontend. The core calls this instead of the int16
     * batch callback once float output has been negotiated. */
    retro_audio_sample_batch_float_t batch;
+};
+
+/**
+ * Renders multiple audio frames of a multi-channel layout.
+ *
+ * Valid only after the frontend has answered \c true to
+ * \c RETRO_ENVIRONMENT_GET_AUDIO_SAMPLE_BATCH_MULTI.
+ *
+ * @param data Interleaved frames of \c channels samples, one sample
+ *     a speaker in the ascending-bit order of \c layout; int16 or
+ *     float in [-1.0, 1.0] by the entry point.
+ * @param frames The number of frames in \c data.
+ * @param channels Samples per frame: the bits set in \c layout.
+ * @param layout The speaker mask, from the \c RETRO_AUDIO_SPEAKER_ bits.
+ * @return The number of frames processed; 0 for a layout the frontend
+ *     does not take.
+ * @see RETRO_ENVIRONMENT_GET_AUDIO_SAMPLE_BATCH_MULTI
+ */
+typedef size_t (RETRO_CALLCONV *retro_audio_sample_batch_multi_int16_t)(
+      const int16_t *data, size_t frames, unsigned channels, unsigned layout);
+typedef size_t (RETRO_CALLCONV *retro_audio_sample_batch_multi_float_t)(
+      const float *data, size_t frames, unsigned channels, unsigned layout);
+
+/**
+ * Multi-channel batch callbacks handed to the core in response to
+ * \c RETRO_ENVIRONMENT_GET_AUDIO_SAMPLE_BATCH_MULTI.
+ */
+struct retro_audio_sample_multi_callback
+{
+   /* Set by the frontend. */
+   retro_audio_sample_batch_multi_int16_t batch_int16;
+   /* Set by the frontend when float output is negotiated too, NULL
+    * otherwise. */
+   retro_audio_sample_batch_multi_float_t batch_float;
 };
 
 /**

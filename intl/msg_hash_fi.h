@@ -1234,7 +1234,6 @@ static const struct
    char s_1cdff4ac[19];
    char s_012938fb[32];
    char s_2f169651[20];
-   char s_73674a86[17];
    char s_705eee28[47];
    char s_62af62ac[50];
    char s_12b25a4b[49];
@@ -1357,7 +1356,6 @@ static const struct
    char s_74b77b4a[14];
    char s_7534cfc9[6];
    char s_36259b63[22];
-   char s_37368130[10];
    char s_d51f54a2[14];
    char s_b35f573c[10];
    char s_1cad7751[11];
@@ -1761,6 +1759,8 @@ static const struct
    char s_519cd5f8[22];
    char s_43ac80a0[11];
    char s_6959ce80[13];
+   char s_886631ec[18];
+   char s_aa628249[10];
    char s_ebe994b4[12];
    char s_1c62c301[14];
    char s_a8bb35b6[9];
@@ -2083,6 +2083,7 @@ static const struct
    char s_f9dd6e61[12];
    char s_25e89959[7];
    char s_a7468d68[27];
+   char s_b1d6fea6[9];
    char s_aa0659db[22];
    char s_49757b91[22];
    char s_660eb9c4[22];
@@ -2923,7 +2924,6 @@ static const struct
    char s_977f8e82[113];
    char s_5b059407[141];
    char s_7e96b5ce[36];
-   char s_3547866d[130];
    char s_8010a29e[97];
    char s_81120e85[87];
    char s_47ae341f[86];
@@ -4719,7 +4719,6 @@ static const struct
    "N\303\244yt\303\244 sivupalkki",
    "Esikatselukuvan skaalauskerroin",
    "K\303\244yt\303\244 PAL60-tilaa",
-   "Yl\303\244tason kansio",
    "Keskeyt\303\244 sis\303\244lt\303\266 kun valikko on aktiivisena",
    "Keskeyt\303\244 sis\303\244lt\303\266, kun ikkuna ei ole aktiivinen",
    "Keskeyt\303\244 sis\303\244lt\303\266 kun yhteys ohjaimeen katkeaa",
@@ -4842,7 +4841,6 @@ static const struct
    "&Vapauta ydin",
    "&Ohje",
    "Tietoja RetroArchista",
-   "Avustajat",
    "Dokumentaatio",
    "Tyhjenn\303\244",
    "&Ty\303\266kalut",
@@ -5254,6 +5252,8 @@ static const struct
    "K\303\244ytt\303\266j\303\244rjestelm\303\244",
    "Git-versio",
    "Lakka-versio",
+   "MoltenVK:n versio",
+   "Tahdistus",
    "Virtal\303\244hde",
    "Akku t\303\244ynn\303\244",
    "Latautuu",
@@ -5578,6 +5578,7 @@ static const struct
    "Kuvaketeema",
    "Kyll\303\244",
    "YouTube-suoratoiston avain",
+   "HDR-tila",
    "Varjostimen esiasetus",
    "Varjostimen esiasetus",
    "Varjostimen esiasetus",
@@ -6877,8 +6878,6 @@ static const struct
    "Antaa laitteistorender\303\266iville ytimille oman yksityisen kontekstinsa. N\303\244in v\303"
    "\244ltet\303\244\303\244n laitteiston tilamuutosten arvailu kuvien v\303\244liss\303\244.",
    "Muuta videon synkronointiasetuksia.",
-   "Parantaa suorituskyky\303\244 viiveen kustannuksella ja lis\303\244\303\244 videon nykimist\303"
-   "\244. K\303\244yt\303\244 vain, jos t\303\244ytt\303\244 nopeutta ei saada muuten.",
    "Mukautettu ikkunan korkeus mit\303\244 k\303\244ytet\303\244\303\244n, jos kuvasuhde on asetettu"
    " 'Mukautettu kuvasuhde'.",
    "Mukautettu ikkunan leveys mit\303\244 k\303\244ytet\303\244\303\244n, jos Kuvasuhde on 'Mukautet"
@@ -7458,7 +7457,7 @@ static const struct
  * compiler that pads this struct fails here instead of
  * misindexing at runtime. */
 typedef char msg_hash_fi_blob_check[
-      (sizeof(msg_hash_fi_blob) == (124250u
+      (sizeof(msg_hash_fi_blob) == (124130u
 #ifdef HAVE_LAKKA
        + 257u
 #endif
@@ -7927,7 +7926,6 @@ static const uint32_t msg_hash_fi_ids[] =
    (uint32_t)MENU_ENUM_LABEL_VALUE_ANDROID_INPUT_DISCONNECT_WORKAROUND,
    (uint32_t)MENU_ENUM_LABEL_VALUE_APPICON_SETTINGS,
    (uint32_t)MENU_ENUM_LABEL_VALUE_ASSETS_DIRECTORY,
-   (uint32_t)MENU_ENUM_LABEL_VALUE_AUDIO_BLOCK_FRAMES,
    (uint32_t)MENU_ENUM_LABEL_VALUE_AUDIO_DEVICE,
    (uint32_t)MENU_ENUM_LABEL_VALUE_AUDIO_DRIVER,
    (uint32_t)MENU_ENUM_LABEL_VALUE_AUDIO_DSP_PLUGIN,
@@ -8983,7 +8981,6 @@ static const uint32_t msg_hash_fi_ids[] =
    (uint32_t)MENU_ENUM_LABEL_VALUE_OZONE_SHOW_SIDEBAR,
    (uint32_t)MENU_ENUM_LABEL_VALUE_OZONE_THUMBNAIL_SCALE_FACTOR,
    (uint32_t)MENU_ENUM_LABEL_VALUE_PAL60_ENABLE,
-   (uint32_t)MENU_ENUM_LABEL_VALUE_PARENT_DIRECTORY,
    (uint32_t)MENU_ENUM_LABEL_VALUE_PAUSE_LIBRETRO,
    (uint32_t)MENU_ENUM_LABEL_VALUE_PAUSE_NONACTIVE,
    (uint32_t)MENU_ENUM_LABEL_VALUE_PAUSE_ON_DISCONNECT,
@@ -9106,7 +9103,6 @@ static const uint32_t msg_hash_fi_ids[] =
    (uint32_t)MENU_ENUM_LABEL_VALUE_QT_MENU_FILE_UNLOAD_CORE,
    (uint32_t)MENU_ENUM_LABEL_VALUE_QT_MENU_HELP,
    (uint32_t)MENU_ENUM_LABEL_VALUE_QT_MENU_HELP_ABOUT,
-   (uint32_t)MENU_ENUM_LABEL_VALUE_QT_MENU_HELP_ABOUT_CONTRIBUTORS,
    (uint32_t)MENU_ENUM_LABEL_VALUE_QT_MENU_HELP_DOCUMENTATION,
    (uint32_t)MENU_ENUM_LABEL_VALUE_QT_MENU_SEARCH_CLEAR,
    (uint32_t)MENU_ENUM_LABEL_VALUE_QT_MENU_TOOLS,
@@ -9509,6 +9505,8 @@ static const uint32_t msg_hash_fi_ids[] =
    (uint32_t)MENU_ENUM_LABEL_VALUE_SYSTEM_INFO_FRONTEND_OS,
    (uint32_t)MENU_ENUM_LABEL_VALUE_SYSTEM_INFO_GIT_VERSION,
    (uint32_t)MENU_ENUM_LABEL_VALUE_SYSTEM_INFO_LAKKA_VERSION,
+   (uint32_t)MENU_ENUM_LABEL_VALUE_SYSTEM_INFO_MOLTENVK_VERSION,
+   (uint32_t)MENU_ENUM_LABEL_VALUE_SYSTEM_INFO_PACING,
    (uint32_t)MENU_ENUM_LABEL_VALUE_SYSTEM_INFO_POWER_SOURCE,
    (uint32_t)MENU_ENUM_LABEL_VALUE_SYSTEM_INFO_POWER_SOURCE_CHARGED,
    (uint32_t)MENU_ENUM_LABEL_VALUE_SYSTEM_INFO_POWER_SOURCE_CHARGING,
@@ -9831,6 +9829,7 @@ static const uint32_t msg_hash_fi_ids[] =
    (uint32_t)MENU_ENUM_LABEL_VALUE_XMB_THEME,
    (uint32_t)MENU_ENUM_LABEL_VALUE_YES,
    (uint32_t)MENU_ENUM_LABEL_VALUE_YOUTUBE_STREAM_KEY,
+   (uint32_t)MENU_ENUM_LABEL_VIDEO_HDR_ENABLE,
    (uint32_t)MENU_ENUM_LABEL_VIDEO_SHADER_PRESET_APPEND_TWO,
    (uint32_t)MENU_ENUM_LABEL_VIDEO_SHADER_PRESET_PREPEND_TWO,
    (uint32_t)MENU_ENUM_LABEL_VIDEO_SHADER_PRESET_TWO,
@@ -10671,7 +10670,6 @@ static const uint32_t msg_hash_fi_ids[] =
    (uint32_t)MENU_ENUM_SUBLABEL_VIDEO_SHADER_REMEMBER_LAST_DIR,
    (uint32_t)MENU_ENUM_SUBLABEL_VIDEO_SHARED_CONTEXT,
    (uint32_t)MENU_ENUM_SUBLABEL_VIDEO_SYNCHRONIZATION_SETTINGS,
-   (uint32_t)MENU_ENUM_SUBLABEL_VIDEO_THREADED,
    (uint32_t)MENU_ENUM_SUBLABEL_VIDEO_VIEWPORT_CUSTOM_HEIGHT,
    (uint32_t)MENU_ENUM_SUBLABEL_VIDEO_VIEWPORT_CUSTOM_WIDTH,
    (uint32_t)MENU_ENUM_SUBLABEL_VIDEO_VSYNC,

@@ -173,6 +173,9 @@
 
 #define DEFAULT_CRT_SWITCH_RESOLUTION_SUPER 2560
 
+/* SDL display server: 0 never, 1 only when the native server cannot switch modes, 2 always */
+#define DEFAULT_VIDEO_SDL_DISPLAY_SERVER VIDEO_SDL_DISPLAY_SERVER_AUTO
+
 #define DEFAULT_CRT_SWITCH_CENTER_ADJUST 0
 
 #define DEFAULT_CRT_SWITCH_PORCH_ADJUST 0
@@ -207,7 +210,7 @@
 #define DEFAULT_BLUETOOTH_ERTM false
 #endif
 
-#if (defined(_WIN32) && !defined(_XBOX)) || (defined(__linux) && !defined(ANDROID) && !defined(HAVE_LAKKA)) || (defined(__MACH__) && !defined(IOS)) || defined(__EMSCRIPTEN__)
+#if (defined(_WIN32) && !defined(_XBOX)) || (defined(__linux) && !defined(ANDROID) && !defined(HAVE_LAKKA)) || (defined(__MACH__) && !TARGET_OS_IPHONE) || defined(__EMSCRIPTEN__)
 #define DEFAULT_MOUSE_ENABLE true
 #else
 #define DEFAULT_MOUSE_ENABLE false
@@ -263,6 +266,10 @@
 #else
 #define DEFAULT_WINDOWED_FULLSCREEN true
 #endif
+
+/* Not platform-specific: how hard to push for exclusive fullscreen
+ * where the platform lets the application decide. */
+#define DEFAULT_VIDEO_FSE_NEGOTIATION VIDEO_FSE_RELAXED
 
 /* Enable automatic switching of the screen refresh rate when using the specified screen mode(s),
  * based on running core/content */
@@ -445,6 +452,11 @@
  * of slower convergence after content load. */
 #define DEFAULT_FRAME_TIME_SAMPLE_GATED false
 
+/* Measure the refresh-rate estimate from the display's reported present
+ * times rather than the frame loop. Off: the estimate keeps measuring
+ * exactly what it always has. */
+#define DEFAULT_FRAME_TIME_SAMPLE_FROM_DISPLAY false
+
 /* When true, drains the 'Estimated Screen Refresh Rate' sample
  * buffer after fast-forward, save state, or load state -- events
  * whose timing doesn't reflect normal frame cadence and would
@@ -488,14 +500,34 @@
  */
 #define DEFAULT_SWAP_INTERVAL 1
 
-/* Threaded video. Will possibly increase performance significantly
- * at the cost of worse synchronization and latency.
- */
+/* Threaded video: the core runs on one thread and the video driver
+ * presents on another. Off by default, as it has always been; the
+ * Switch keeps its own default. When it is on, hardware-rendered cores
+ * follow it on every API that has a ring, with no setting of their
+ * own. */
 #if defined(HAVE_LIBNX)
 #define DEFAULT_VIDEO_THREADED true
 #else
 #define DEFAULT_VIDEO_THREADED false
 #endif
+
+/* Pace repeated frames from the display's own report of when a present
+ * reached it, where the driver or context can say. Off falls back to the
+ * frontend clock, which is also what happens with no reporter. */
+#define DEFAULT_VIDEO_PRESENT_TIMING_FROM_DISPLAY true
+
+/* With threaded video, keep presenting the last frame at the display's
+ * cadence while the core is late, instead of leaving the last present
+ * on screen for longer. Needs a driver that can repeat a frame cheaply
+ * (poke->present_last); ignored under BFI and shader sub-frames. */
+#define DEFAULT_VIDEO_THREADED_PRESENT_REPEAT false
+
+/* With threaded video, pace the core from the display: start each frame
+ * as late as the next refresh allows given measured core and render
+ * times. Off: the fixed-timer pacing threaded video always had. */
+#define DEFAULT_VIDEO_THREADED_DISPLAY_PACING false
+
+
 
 #if defined(HAVE_THREADS)
 #if defined(GEKKO) || defined(PSP) || defined(PS2)
@@ -507,6 +539,11 @@
 #else
 #define DEFAULT_THREADED_DATA_RUNLOOP_ENABLE false
 #endif
+
+/* Off everywhere: pinning the main and audio threads to the fast
+ * cores of a mixed-core part trades battery for latency, so it is
+ * the user's call. */
+#define DEFAULT_THREAD_PREFER_FAST_CORES false
 
 /* Set to true if HW render cores should get their private context. */
 #define DEFAULT_VIDEO_SHARED_CONTEXT false
@@ -828,7 +865,18 @@
 #define DEFAULT_MENU_SHOW_INFORMATION true
 #define DEFAULT_MENU_SHOW_CONFIGURATIONS true
 #define DEFAULT_MENU_SHOW_HELP true
+#if defined(ANDROID)
+/* Android's navigation model expects the user to leave via Home or the
+ * task switcher rather than an in-app control, and the Android TV
+ * guidelines state outright that an exit item should not appear in the
+ * menu. Default the entry off; the toggle stays available under
+ * Settings -> User Interface -> Menu Item Visibility for anyone who
+ * wants it back, and existing configs that already set the key are
+ * left untouched. */
+#define DEFAULT_MENU_SHOW_QUIT false
+#else
 #define DEFAULT_MENU_SHOW_QUIT true
+#endif
 #define DEFAULT_MENU_SHOW_RESTART true
 #define DEFAULT_MENU_SHOW_REBOOT true
 #define DEFAULT_MENU_SHOW_SHUTDOWN true
@@ -836,6 +884,7 @@
 #define DEFAULT_MENU_SHOW_CORE_MANAGER_STEAM true
 #endif
 #define DEFAULT_MENU_SHOW_SUBLABELS true
+#define DEFAULT_MENU_SHOW_SUBLABELS_CURRENT_SELECTION_ONLY false
 #define DEFAULT_MENU_SHOW_CONFIRM true
 #define DEFAULT_MENU_DYNAMIC_WALLPAPER_ENABLE true
 #define DEFAULT_MENU_SCROLL_FAST false
@@ -1023,7 +1072,7 @@
 #define DEFAULT_INPUT_BACKTOUCH_TOGGLE false
 #endif
 
-#if defined(ANDROID) || defined(IOS)
+#if defined(ANDROID) || TARGET_OS_IPHONE
 #define DEFAULT_OVERLAY_ENABLE_AUTOPREFERRED true
 #else
 #define DEFAULT_OVERLAY_ENABLE_AUTOPREFERRED false
@@ -1079,7 +1128,7 @@
 
 /* Color of the message.
  * RGB hex value. */
-#define DEFAULT_MESSAGE_COLOR 0xffff00
+#define DEFAULT_MESSAGE_COLOR 0xffffff
 
 #define DEFAULT_MESSAGE_BGCOLOR_ENABLE false
 #define DEFAULT_MESSAGE_BGCOLOR_RED 0
@@ -1282,6 +1331,34 @@
 /* Will sync audio. (recommended) */
 #define DEFAULT_AUDIO_SYNC true
 
+/* Run the audio pipeline (convert, DSP, resample, volume) on the audio
+ * thread instead of inside the frame.
+ *
+ * On wherever there are threads to run it on. The latency is the same
+ * as the frame-synchronous path at any Audio Latency setting - the
+ * pipeline moves off the frame, it does not add a buffer - while rate
+ * control gets measured at the device's own pace instead of once a
+ * frame, and the resampler leaves the frame budget.
+ *
+ * Nothing here forces it on a driver that cannot take it: audio_driver
+ * requires wait_writable() and no core audio callback, and falls back
+ * to the inline path with a log line otherwise, so this is the default
+ * for the drivers that can and a no-op for the rest. */
+#if defined(HAVE_THREADS)
+#define DEFAULT_AUDIO_THREADED_PIPELINE true
+#else
+#define DEFAULT_AUDIO_THREADED_PIPELINE false
+#endif
+
+/* Ask the OS to schedule the audio thread ahead of the rest of the
+ * frontend. Best effort: a system that refuses keeps the default
+ * priority. On wherever there is an audio thread to raise. */
+#if defined(HAVE_THREADS)
+#define DEFAULT_AUDIO_THREAD_PRIORITY true
+#else
+#define DEFAULT_AUDIO_THREAD_PRIORITY false
+#endif
+
 /* Audio rate control. */
 #if !defined(RARCH_CONSOLE)
 #define DEFAULT_RATE_CONTROL true
@@ -1330,6 +1407,15 @@
  * AUDIO_FORMAT_NEGOTIATION_INT16 (0) or AUDIO_FORMAT_NEGOTIATION_FLOAT (1).
  * Float by default, matching RetroArch's historical driver behaviour. */
 #define DEFAULT_AUDIO_FORMAT_NEGOTIATION AUDIO_FORMAT_NEGOTIATION_FLOAT
+
+/* Speaker layout to open the output device with: 0 stereo, the
+ * pipeline as it always was; 1 quad, 2 5.1, 3 5.1 with the rear pair
+ * at the sides, 4 7.1 - upmixed from the stereo mix. */
+#define DEFAULT_AUDIO_OUTPUT_LAYOUT 0
+
+/* Headphone virtual surround on a stereo device: off; it is for
+ * headphones and narrows the stereo on speakers. */
+#define DEFAULT_AUDIO_HEADPHONE_VIRTUAL_SURROUND false
 /* Automatically mute audio when rewind is enabled. */
 #define DEFAULT_AUDIO_REWIND_MUTE false
 
@@ -1405,7 +1491,7 @@
 
 /* Saves non-volatile SRAM at a regular interval.
  * It is measured in seconds. A value of 0 disables autosave. */
-#if defined(__i386__) || defined(__i486__) || defined(__i686__) || defined(__x86_64__) || defined(_M_X64) || defined(_WIN32) || defined(OSX) || defined(ANDROID) || defined(IOS) || defined(DINGUX)
+#if defined(__i386__) || defined(__i486__) || defined(__i686__) || defined(__x86_64__) || defined(_M_X64) || defined(_WIN32) || TARGET_OS_OSX || defined(ANDROID) || TARGET_OS_IPHONE || defined(DINGUX)
 /* Flush to file every 10 seconds on modern platforms by default */
 #define DEFAULT_AUTOSAVE_INTERVAL 10
 #else
@@ -1508,7 +1594,7 @@
 
 /* Automatically saves a savestate at a regular interval.
  * It is measured in seconds. A value of 0 disables automatic savestate saving. */
-#if defined(__i386__) || defined(__i486__) || defined(__i686__) || defined(__x86_64__) || defined(_M_X64) || defined(_WIN32) || defined(OSX) || defined(ANDROID) || defined(IOS) || defined(DINGUX)
+#if defined(__i386__) || defined(__i486__) || defined(__i686__) || defined(__x86_64__) || defined(_M_X64) || defined(_WIN32) || TARGET_OS_OSX || defined(ANDROID) || TARGET_OS_IPHONE || defined(DINGUX)
 /* Disabled by default but can be enabled by user */
 #define DEFAULT_SAVESTATE_AUTOMATIC_INTERVAL 0
 #else
@@ -1533,6 +1619,14 @@
 #define DEFAULT_SAVESTATE_FILE_COMPRESSION false
 #else
 #define DEFAULT_SAVESTATE_FILE_COMPRESSION true
+#endif
+
+/* The codec compressed saves are written with: 0 deflate, 1
+ * Zstandard. Zstandard where the built-in codec is compiled in. */
+#ifdef HAVE_RZSTD
+#define DEFAULT_SAVE_COMPRESSION_CODEC 1
+#else
+#define DEFAULT_SAVE_COMPRESSION_CODEC 0
 #endif
 
 /* Slowmotion ratio. */
@@ -1570,7 +1664,7 @@
  * updated via the online updater
  * > Enable by default on all modern platforms with
  *   online updater support */
-#if defined(HAVE_ONLINE_UPDATER) && (defined(__i386__) || defined(__i486__) || defined(__i686__) || defined(__x86_64__) || defined(_M_X64) || defined(_WIN32) || defined(OSX) || defined(ANDROID) || defined(IOS))
+#if defined(HAVE_ONLINE_UPDATER) && (defined(__i386__) || defined(__i486__) || defined(__i686__) || defined(__x86_64__) || defined(_M_X64) || defined(_WIN32) || TARGET_OS_OSX || defined(ANDROID) || TARGET_OS_IPHONE)
 #define DEFAULT_CORE_UPDATER_AUTO_BACKUP true
 #else
 #define DEFAULT_CORE_UPDATER_AUTO_BACKUP false
@@ -1777,7 +1871,7 @@
 #else
 #define DEFAULT_MENU_TIMEDATE_ENABLE true
 #endif
-#define DEFAULT_MENU_TIMEDATE_STYLE          MENU_TIMEDATE_STYLE_DDMM_HM
+#define DEFAULT_MENU_TIMEDATE_STYLE          MENU_TIMEDATE_STYLE_YMD_HM
 #define DEFAULT_MENU_TIMEDATE_DATE_SEPARATOR MENU_TIMEDATE_DATE_SEPARATOR_HYPHEN
 #define DEFAULT_MENU_REMEMBER_SELECTION      MENU_REMEMBER_SELECTION_ALWAYS
 #define DEFAULT_MENU_STARTUP_PAGE            MENU_STARTUP_PAGE_MAIN_MENU
@@ -1787,7 +1881,7 @@
 
 #define DEFAULT_XMB_THUMBNAIL_SCALE_FACTOR 100
 
-#ifdef IOS
+#if TARGET_OS_IPHONE
 #define DEFAULT_UI_COMPANION_START_ON_BOOT false
 #else
 #define DEFAULT_UI_COMPANION_START_ON_BOOT true
@@ -1799,6 +1893,25 @@
 
 /* Only init the WIMP UI for this session if this is enabled */
 #define DEFAULT_DESKTOP_MENU_ENABLE true
+
+/* Desktop companion presentation settings, shared by the Qt, Win32 and
+ * Cocoa companions. */
+#define DEFAULT_DESKTOP_MENU_VIEW_TYPE 0            /* 0 list, 1 icons */
+#define DEFAULT_DESKTOP_MENU_THUMBNAIL_TYPE 0       /* 0 boxart, 1 screenshot, 2 title, 3 logo */
+#define DEFAULT_DESKTOP_MENU_SUGGEST_LOADED_CORE_FIRST false
+#define DEFAULT_DESKTOP_MENU_SAVE_LAST_TAB false
+#define DEFAULT_DESKTOP_MENU_LAST_TAB 0
+#define DEFAULT_DESKTOP_MENU_SAVE_GEOMETRY false
+#define DEFAULT_DESKTOP_MENU_SAVE_DOCK_POSITIONS false
+#define DEFAULT_DESKTOP_MENU_SHOW_WELCOME_SCREEN true
+#define DEFAULT_DESKTOP_MENU_SCAN_FINISH_CONFIRM true
+#define DEFAULT_DESKTOP_MENU_THUMBNAIL_CACHE_LIMIT 500
+#define DEFAULT_DESKTOP_MENU_THUMBNAIL_MAX_SIZE 0   /* 0 = unlimited */
+#define DEFAULT_DESKTOP_MENU_THUMBNAIL_QUALITY 0     /* 0 = default */
+#define DEFAULT_DESKTOP_MENU_ICON_VIEW_ZOOM 50
+#define DEFAULT_DESKTOP_MENU_ALL_PLAYLISTS_LIST_MAX_COUNT 0
+#define DEFAULT_DESKTOP_MENU_ALL_PLAYLISTS_GRID_MAX_COUNT 0
+#define DEFAULT_DESKTOP_MENU_THEME 0                 /* 0 system, 1 dark, 2 custom */
 
 /* Keep track of how long each core+content has been running for over time */
 
@@ -1816,7 +1929,7 @@
 
 #define DEFAULT_UI_MENUBAR_ENABLE true
 
-#if defined(__QNX__) || defined(_XBOX1) || defined(_XBOX360) || (defined(__MACH__) && defined(IOS)) || defined(ANDROID) || defined(WIIU) || defined(HAVE_NEON) || defined(GEKKO) || defined(__ARM_NEON__) || defined(__PS3__)
+#if defined(__QNX__) || defined(_XBOX1) || defined(_XBOX360) || (defined(__MACH__) && TARGET_OS_IPHONE) || defined(ANDROID) || defined(WIIU) || defined(HAVE_NEON) || defined(GEKKO) || defined(__ARM_NEON) || defined(__ARM_NEON__) || defined(__PS3__)
 #define DEFAULT_AUDIO_RESAMPLER_QUALITY_LEVEL RESAMPLER_QUALITY_LOWER
 #elif defined(PSP) || defined(_3DS) || defined(VITA) || defined(PS2) || defined(DINGUX)
 #define DEFAULT_AUDIO_RESAMPLER_QUALITY_LEVEL RESAMPLER_QUALITY_LOWEST
@@ -1841,13 +1954,13 @@
 /* Only applies to Android 7.0 (API 24) and up */
 #define DEFAULT_SUSTAINED_PERFORMANCE_MODE false
 
-#if defined(ANDROID) || defined(IOS)
+#if defined(ANDROID) || TARGET_OS_IPHONE
 #define DEFAULT_VIBRATE_ON_KEYPRESS true
 #else
 #define DEFAULT_VIBRATE_ON_KEYPRESS false
 #endif
 
-#if defined(IOS)
+#if TARGET_OS_IPHONE
 #define DEFAULT_ENABLE_DEVICE_VIBRATION true
 #else
 #define DEFAULT_ENABLE_DEVICE_VIBRATION false
@@ -1905,9 +2018,9 @@
 #endif
 #elif defined(__QNX__)
 #define DEFAULT_BUILDBOT_SERVER_URL "http://buildbot.libretro.com/nightly/blackberry/latest/"
-#elif defined(IOS)
+#elif TARGET_OS_IPHONE
 #define DEFAULT_BUILDBOT_SERVER_URL "http://buildbot.libretro.com/nightly/apple/ios/latest/"
-#elif defined(OSX)
+#elif TARGET_OS_OSX
 #if defined(__x86_64__)
 #if defined(HAVE_SSL)
 #define DEFAULT_BUILDBOT_SERVER_URL "https://buildbot.libretro.com/nightly/apple/osx/x86_64/latest/"

@@ -1421,7 +1421,6 @@ static const struct
    char s_012938fb[31];
    char s_a747cdc9[67];
    char s_2f169651[17];
-   char s_73674a86[21];
    char s_705eee28[43];
    char s_62af62ac[39];
    char s_12b25a4b[38];
@@ -1546,7 +1545,6 @@ static const struct
    char s_74b77b4a[22];
    char s_7534cfc9[7];
    char s_36259b63[16];
-   char s_37368130[14];
    char s_d51f54a2[15];
    char s_b35f573c[7];
    char s_1cad7751[13];
@@ -1928,7 +1926,6 @@ static const struct
    char s_c7bc8298[27];
    char s_e63b035a[31];
    char s_d21d875b[23];
-   char s_ae86fed0[29];
    char s_b12ae22e[20];
    char s_b2d073c7[20];
    char s_1cbc2657[22];
@@ -1997,6 +1994,7 @@ static const struct
    char s_43ac80a0[16];
    char s_6959ce80[18];
    char s_886631ec[21];
+   char s_aa628249[5];
    char s_ebe994b4[23];
    char s_1c62c301[8];
    char s_a8bb35b6[9];
@@ -3310,16 +3308,10 @@ static const struct
 #ifdef HAVE_SMBCLIENT
    char s_3e1e294b[51];
    char s_69c0e487[58];
-   char s_706ff4dc[199];
    char s_a0d1a85c[67];
-   char s_b5966528[35];
    char s_907ef7cc[33];
    char s_b0a46506[56];
-   char s_04624c88[40];
-   char s_91976dbe[45];
    char s_f6492edc[57];
-   char s_9bb85635[39];
-   char s_22a05685[41];
 #endif
    char s_f3bfa8b9[92];
    char s_5fe2cee5[73];
@@ -3463,7 +3455,6 @@ static const struct
    char s_1eebf4f8[217];
    char s_2f2ca2b6[217];
    char s_2c9be635[140];
-   char s_05ec12e6[190];
    char s_b5a603de[53];
    char s_d9c2db25[75];
 #ifdef HAVE_ODROIDGO2
@@ -3506,7 +3497,6 @@ static const struct
    char s_d62ed5dc[379];
    char s_2e69508b[409];
    char s_7e96b5ce[57];
-   char s_3547866d[140];
    char s_c2314d30[233];
 #if defined(RARCH_MOBILE)
    char s_82c9e375[177];
@@ -3623,6 +3613,7 @@ static const struct
    char s_ec5751c3[26];
    char s_af4b70f4[41];
    char s_d9afe3b5[46];
+   char s_70ecb843[8];
    char s_312fd783[45];
    char s_96df643a[87];
    char s_150b4ebe[76];
@@ -5744,7 +5735,6 @@ static const struct
    "Factor de escala de miniaturas",
    "Truncar os nomes das listas de reproduci\303\263n (requ\303\255rese reiniciar)",
    "Use o modo PAL60",
-   "Directorio principal",
    "Pausa o contido cando o men\303\272 estea activo",
    "Pausa o contido cando non est\303\241 activo",
    "Pausar contido ao desconectar o mando",
@@ -5870,7 +5860,6 @@ static const struct
    "&Descargar un N\303\272cleo",
    "&Axuda",
    "Sobre RetroArch",
-   "Colaboradores",
    "Documentaci\303\263n",
    "Limpar",
    "&Ferramentas",
@@ -6260,7 +6249,6 @@ static const struct
    "Configuraci\303\263n da rede SMB",
    "Nome do recurso compartido SMB",
    "Recurso compartido SMB",
-   "Subdirectorio SMB (opcional)",
    "Tempo de espera SMB",
    "Nome de usuario SMB",
    "Grupo de traballo SMB",
@@ -6329,6 +6317,7 @@ static const struct
    "Versi\303\263n de Git",
    "Versi\303\263n de Lakka",
    "Versi\303\263n de MoltenVK",
+   "Paso",
    "Fonte de alimentaci\303\263n",
    "Cargada",
    "Cargando",
@@ -8134,18 +8123,10 @@ static const struct
 #ifdef HAVE_SMBCLIENT
    "Selecciona a autenticaci\303\263n usada no teu contorno.",
    "Explorar ficheiros no recurso compartido SMB configurado.",
-   "Activar o acceso a compartici\303\263ns de rede SMB. Recom\303\251ndase encarecidamente usar Eth"
-   "ernet en lugar de Wi-Fi para unha conexi\303\263n m\303\241is fiable. Nota: cambiar estes axuste"
-   "s require reiniciar RetroArch.",
    "Selecciona o n\303\272mero m\303\241ximo de conexi\303\263ns usadas no teu contorno.",
-   "Contrasinal para a autenticaci\303\263n.",
    "Enderezo IP ou nome do servidor.",
    "Configura os axustes da carpeta compartida en rede SMB.",
-   "Nome do recurso de rede ao que acceder.",
-   "Ruta do subdirectorio no recurso compartido.",
    "Selecciona o tempo de espera predeterminado en segundos.",
-   "Nome de usuario para a autenticaci\303\263n.",
-   "Nome do grupo de traballo ou do dominio.",
 #endif
    "Ordena os ficheiros gardados en cartafoles co nome do directorio no que se atopa o contido.",
    "Ordena os ficheiros gardados en cartafoles co nome do n\303\272cleo utilizado.",
@@ -8371,9 +8352,6 @@ static const struct
    "or da pantalla). Pode introducir artefactos de escala.",
    "Captura a imaxe despois de aplicar filtros (pero non sombreadores). O v\303\255deo ter\303\241 u"
    "n aspecto tan elegante como o que ves na t\303\272a pantalla.",
-   "Frecuencia de actualizaci\303\263n vertical da t\303\272a pantalla. \303\232sase para calcular u"
-   "nha taxa de entrada de son axeitada. Isto ignorarase se est\303\241 activado \342\200\234V\303"
-   "\255deo con f\303\255os (Threaded Video)\342\200\235.",
    "A taxa de actualizaci\303\263n estimada da pantalla en Hz.",
    "A taxa de actualizaci\303\263n segundo a informada polo controlador da pantalla.",
 #ifdef HAVE_ODROIDGO2
@@ -8451,8 +8429,6 @@ static const struct
    "mo de fotogramas mellorado cando se executa, por exemplo. Contido de 30 fps nunha pantalla de 60"
    " Hz ou contido de 60 fps nunha pantalla de 120 Hz.",
    "Cambiar as configuraci\303\263ns de sincronizaci\303\263n de v\303\255deo.",
-   "Millora o rendemento a costa da latencia e que o v\303\255deo vaia a saltos. \303\232sao s\303"
-   "\263 se a velocidade completa non se pode obter doutra maneira.",
    "Tenta mellorar o rendemento usando b\303\272feres de argumentos de Metal. Alg\303\272ns n\303"
    "\272cleos poden requirilo. Isto pode provocar erros nalg\303\272ns sombreadores, especialmente e"
    "n soporte f\303\255sico antigo ou versi\303\263ns antigas do sistema operativo.",
@@ -8600,6 +8576,7 @@ static const struct
    "Este xogo non ten logros.",
    "Erro ao cargar o xogo de RetroLogros: %s",
    "RetroLogros: Non se puido identificar o xogo.",
+   "Extremo",
    "Modo Hardcore dos logros cambiado polo host.",
    "Cargouse un estado de gardado. Logros Modo Hardcore desactivado para a sesi\303\263n actual.",
    "Activouse un truco. Logros Modo Hardcore desactivado para a sesi\303\263n actual.",
@@ -9115,7 +9092,7 @@ static const struct
  * compiler that pads this struct fails here instead of
  * misindexing at runtime. */
 typedef char msg_hash_gl_blob_check[
-      (sizeof(msg_hash_gl_blob) == (194252u
+      (sizeof(msg_hash_gl_blob) == (193900u
 #ifdef ANDROID
        + 365u
 #endif
@@ -9242,7 +9219,6 @@ typedef char msg_hash_gl_blob_check[
        + 27u
        + 31u
        + 23u
-       + 29u
        + 20u
        + 20u
        + 22u
@@ -9424,16 +9400,10 @@ typedef char msg_hash_gl_blob_check[
        + 44u
        + 51u
        + 58u
-       + 199u
        + 67u
-       + 35u
        + 33u
        + 56u
-       + 40u
-       + 45u
        + 57u
-       + 39u
-       + 41u
 #endif
 #ifdef HAVE_LAKKA
        + 64u
@@ -9766,7 +9736,6 @@ static const uint32_t msg_hash_gl_ids[] =
    (uint32_t)MENU_ENUM_LABEL_VALUE_APPICON_SETTINGS,
    (uint32_t)MENU_ENUM_LABEL_VALUE_ASSETS_DIRECTORY,
    (uint32_t)MENU_ENUM_LABEL_VALUE_AUDIO_ASIO_CONTROL_PANEL,
-   (uint32_t)MENU_ENUM_LABEL_VALUE_AUDIO_BLOCK_FRAMES,
    (uint32_t)MENU_ENUM_LABEL_VALUE_AUDIO_DEVICE,
    (uint32_t)MENU_ENUM_LABEL_VALUE_AUDIO_DRIVER,
    (uint32_t)MENU_ENUM_LABEL_VALUE_AUDIO_DSP_PLUGIN,
@@ -10922,7 +10891,6 @@ static const uint32_t msg_hash_gl_ids[] =
    (uint32_t)MENU_ENUM_LABEL_VALUE_OZONE_THUMBNAIL_SCALE_FACTOR,
    (uint32_t)MENU_ENUM_LABEL_VALUE_OZONE_TRUNCATE_PLAYLIST_NAME,
    (uint32_t)MENU_ENUM_LABEL_VALUE_PAL60_ENABLE,
-   (uint32_t)MENU_ENUM_LABEL_VALUE_PARENT_DIRECTORY,
    (uint32_t)MENU_ENUM_LABEL_VALUE_PAUSE_LIBRETRO,
    (uint32_t)MENU_ENUM_LABEL_VALUE_PAUSE_NONACTIVE,
    (uint32_t)MENU_ENUM_LABEL_VALUE_PAUSE_ON_DISCONNECT,
@@ -11047,7 +11015,6 @@ static const uint32_t msg_hash_gl_ids[] =
    (uint32_t)MENU_ENUM_LABEL_VALUE_QT_MENU_FILE_UNLOAD_CORE,
    (uint32_t)MENU_ENUM_LABEL_VALUE_QT_MENU_HELP,
    (uint32_t)MENU_ENUM_LABEL_VALUE_QT_MENU_HELP_ABOUT,
-   (uint32_t)MENU_ENUM_LABEL_VALUE_QT_MENU_HELP_ABOUT_CONTRIBUTORS,
    (uint32_t)MENU_ENUM_LABEL_VALUE_QT_MENU_HELP_DOCUMENTATION,
    (uint32_t)MENU_ENUM_LABEL_VALUE_QT_MENU_SEARCH_CLEAR,
    (uint32_t)MENU_ENUM_LABEL_VALUE_QT_MENU_TOOLS,
@@ -11428,7 +11395,6 @@ static const uint32_t msg_hash_gl_ids[] =
    (uint32_t)MENU_ENUM_LABEL_VALUE_SMB_CLIENT_SETTINGS,
    (uint32_t)MENU_ENUM_LABEL_VALUE_SMB_CLIENT_SHARE,
    (uint32_t)MENU_ENUM_LABEL_VALUE_SMB_CLIENT_SMB_SHARE,
-   (uint32_t)MENU_ENUM_LABEL_VALUE_SMB_CLIENT_SUBDIR,
    (uint32_t)MENU_ENUM_LABEL_VALUE_SMB_CLIENT_TIMEOUT,
    (uint32_t)MENU_ENUM_LABEL_VALUE_SMB_CLIENT_USERNAME,
    (uint32_t)MENU_ENUM_LABEL_VALUE_SMB_CLIENT_WORKGROUP,
@@ -11497,6 +11463,7 @@ static const uint32_t msg_hash_gl_ids[] =
    (uint32_t)MENU_ENUM_LABEL_VALUE_SYSTEM_INFO_GIT_VERSION,
    (uint32_t)MENU_ENUM_LABEL_VALUE_SYSTEM_INFO_LAKKA_VERSION,
    (uint32_t)MENU_ENUM_LABEL_VALUE_SYSTEM_INFO_MOLTENVK_VERSION,
+   (uint32_t)MENU_ENUM_LABEL_VALUE_SYSTEM_INFO_PACING,
    (uint32_t)MENU_ENUM_LABEL_VALUE_SYSTEM_INFO_POWER_SOURCE,
    (uint32_t)MENU_ENUM_LABEL_VALUE_SYSTEM_INFO_POWER_SOURCE_CHARGED,
    (uint32_t)MENU_ENUM_LABEL_VALUE_SYSTEM_INFO_POWER_SOURCE_CHARGING,
@@ -12809,16 +12776,10 @@ static const uint32_t msg_hash_gl_ids[] =
 #ifdef HAVE_SMBCLIENT
    (uint32_t)MENU_ENUM_SUBLABEL_SMB_CLIENT_AUTH_MODE,
    (uint32_t)MENU_ENUM_SUBLABEL_SMB_CLIENT_BROWSE,
-   (uint32_t)MENU_ENUM_SUBLABEL_SMB_CLIENT_ENABLE,
    (uint32_t)MENU_ENUM_SUBLABEL_SMB_CLIENT_NUM_CONTEXTS,
-   (uint32_t)MENU_ENUM_SUBLABEL_SMB_CLIENT_PASSWORD,
    (uint32_t)MENU_ENUM_SUBLABEL_SMB_CLIENT_SERVER,
    (uint32_t)MENU_ENUM_SUBLABEL_SMB_CLIENT_SETTINGS,
-   (uint32_t)MENU_ENUM_SUBLABEL_SMB_CLIENT_SHARE,
-   (uint32_t)MENU_ENUM_SUBLABEL_SMB_CLIENT_SUBDIR,
    (uint32_t)MENU_ENUM_SUBLABEL_SMB_CLIENT_TIMEOUT,
-   (uint32_t)MENU_ENUM_SUBLABEL_SMB_CLIENT_USERNAME,
-   (uint32_t)MENU_ENUM_SUBLABEL_SMB_CLIENT_WORKGROUP,
 #endif
    (uint32_t)MENU_ENUM_SUBLABEL_SORT_SAVEFILES_BY_CONTENT_ENABLE,
    (uint32_t)MENU_ENUM_SUBLABEL_SORT_SAVEFILES_ENABLE,
@@ -12962,7 +12923,6 @@ static const uint32_t msg_hash_gl_ids[] =
    (uint32_t)MENU_ENUM_SUBLABEL_VIDEO_OVERSCAN_CORRECTION_BOTTOM,
    (uint32_t)MENU_ENUM_SUBLABEL_VIDEO_OVERSCAN_CORRECTION_TOP,
    (uint32_t)MENU_ENUM_SUBLABEL_VIDEO_POST_FILTER_RECORD,
-   (uint32_t)MENU_ENUM_SUBLABEL_VIDEO_REFRESH_RATE,
    (uint32_t)MENU_ENUM_SUBLABEL_VIDEO_REFRESH_RATE_AUTO,
    (uint32_t)MENU_ENUM_SUBLABEL_VIDEO_REFRESH_RATE_POLLED,
 #ifdef HAVE_ODROIDGO2
@@ -13005,7 +12965,6 @@ static const uint32_t msg_hash_gl_ids[] =
    (uint32_t)MENU_ENUM_SUBLABEL_VIDEO_SWAPCHAIN_BIT_DEPTH,
    (uint32_t)MENU_ENUM_SUBLABEL_VIDEO_SWAP_INTERVAL,
    (uint32_t)MENU_ENUM_SUBLABEL_VIDEO_SYNCHRONIZATION_SETTINGS,
-   (uint32_t)MENU_ENUM_SUBLABEL_VIDEO_THREADED,
    (uint32_t)MENU_ENUM_SUBLABEL_VIDEO_USE_METAL_ARG_BUFFERS,
 #if defined(RARCH_MOBILE)
    (uint32_t)MENU_ENUM_SUBLABEL_VIDEO_VIEWPORT_BIAS_PORTRAIT_X,
@@ -13122,6 +13081,7 @@ static const uint32_t msg_hash_gl_ids[] =
    (uint32_t)MSG_CHEEVOS_GAME_HAS_NO_ACHIEVEMENTS,
    (uint32_t)MSG_CHEEVOS_GAME_LOAD_FAILED,
    (uint32_t)MSG_CHEEVOS_GAME_NOT_IDENTIFIED,
+   (uint32_t)MSG_CHEEVOS_HARDCORE_MODE,
    (uint32_t)MSG_CHEEVOS_HARDCORE_MODE_CHANGED_BY_HOST,
    (uint32_t)MSG_CHEEVOS_HARDCORE_MODE_DISABLED,
    (uint32_t)MSG_CHEEVOS_HARDCORE_MODE_DISABLED_CHEAT,

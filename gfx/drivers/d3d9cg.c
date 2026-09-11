@@ -2408,7 +2408,7 @@ static void d3d9_cg_renderchain_bind_prev(d3d9_cg_renderchain_t *chain,
       video_size[1]  = chain->prev.last_height[
          (chain->prev.ptr - (i + 1)) & TEXTURESMASK];
 
-      strlcpy(attr + _len, ".texture", sizeof(attr) - _len);
+      strlcpy_lit(attr + _len, ".texture", sizeof(attr) - _len);
       param = cgGetNamedParameter(fprg, attr);
       if (param)
       {
@@ -2428,7 +2428,7 @@ static void d3d9_cg_renderchain_bind_prev(d3d9_cg_renderchain_t *chain,
          IDirect3DDevice9_SetSamplerState(chain->dev, index, D3DSAMP_ADDRESSV, D3DTADDRESS_BORDER);
       }
 
-      strlcpy(attr + _len, ".tex_coord", sizeof(attr) - _len);
+      strlcpy_lit(attr + _len, ".tex_coord", sizeof(attr) - _len);
       param = cgGetNamedParameter(vprg, attr);
       if (param)
       {
@@ -2443,7 +2443,7 @@ static void d3d9_cg_renderchain_bind_prev(d3d9_cg_renderchain_t *chain,
          unsigned_vector_list_append(chain->bound_vert, index);
       }
 
-      strlcpy(attr + _len, ".video_size",   sizeof(attr) - _len);
+      strlcpy_lit(attr + _len, ".video_size",   sizeof(attr) - _len);
 
       param = cgGetNamedParameter(vprg, attr);
       if (param)
@@ -2452,7 +2452,7 @@ static void d3d9_cg_renderchain_bind_prev(d3d9_cg_renderchain_t *chain,
       if (param)
          cgD3D9SetUniform(param, &video_size);
 
-      strlcpy(attr + _len, ".texture_size", sizeof(attr) - _len);
+      strlcpy_lit(attr + _len, ".texture_size", sizeof(attr) - _len);
       param = cgGetNamedParameter(vprg, attr);
       if (param)
          cgD3D9SetUniform(param, &texture_size);
@@ -2486,7 +2486,7 @@ static void d3d9_cg_renderchain_bind_pass(
       texture_size[0] = curr_pass->info.tex_w;
       texture_size[1] = curr_pass->info.tex_h;
 
-      strlcpy(pass_base + _len, ".texture",  sizeof(pass_base) - _len);
+      strlcpy_lit(pass_base + _len, ".texture",  sizeof(pass_base) - _len);
       param = cgGetNamedParameter(fprg, pass_base);
       if (param)
       {
@@ -2503,7 +2503,7 @@ static void d3d9_cg_renderchain_bind_pass(
          IDirect3DDevice9_SetSamplerState(chain->dev, index, D3DSAMP_ADDRESSV, D3DTADDRESS_BORDER);
       }
 
-      strlcpy(pass_base + _len, ".tex_coord", sizeof(pass_base) - _len);
+      strlcpy_lit(pass_base + _len, ".tex_coord", sizeof(pass_base) - _len);
       param = cgGetNamedParameter(vprg, pass_base);
       if (param)
       {
@@ -2517,7 +2517,7 @@ static void d3d9_cg_renderchain_bind_pass(
          unsigned_vector_list_append(chain->bound_vert, index);
       }
 
-      strlcpy(pass_base + _len, ".video_size",   sizeof(pass_base) - _len);
+      strlcpy_lit(pass_base + _len, ".video_size",   sizeof(pass_base) - _len);
       param           = cgGetNamedParameter(vprg, pass_base);
       if (param)
          cgD3D9SetUniform(param, &video_size);
@@ -2525,7 +2525,7 @@ static void d3d9_cg_renderchain_bind_pass(
       if (param)
          cgD3D9SetUniform(param, &video_size);
 
-      strlcpy(pass_base + _len, ".texture_size", sizeof(pass_base) - _len);
+      strlcpy_lit(pass_base + _len, ".texture_size", sizeof(pass_base) - _len);
       param           = cgGetNamedParameter(vprg, pass_base);
       if (param)
          cgD3D9SetUniform(param, &texture_size);
@@ -4449,9 +4449,8 @@ static bool d3d9_cg_frame(void *data, const void *frame,
 
       if (!d3d9_cg_restore(d3d))
       {
-         video_driver_state_t *video_st = video_state_get_ptr();
          RARCH_ERR("[D3D9 Cg] Failed to restore. Requesting reinit.\n");
-         video_st->flags |= VIDEO_FLAG_GPU_DEVICE_LOST;
+         video_driver_modify_disp_flags(VIDEO_FLAG_GPU_DEVICE_LOST, 0);
          return false;
       }
    }
@@ -4623,10 +4622,9 @@ static bool d3d9_cg_frame(void *data, const void *frame,
       HRESULT hr = IDirect3DDevice9_Present(d3d->dev, NULL, NULL, NULL, NULL);
       if (hr == D3DERR_DEVICELOST)
       {
-         video_driver_state_t *video_st = video_state_get_ptr();
          RARCH_WARN("[D3D9 Cg] Device lost detected on Present().\n");
          d3d->needs_restore = true;
-         video_st->flags |= VIDEO_FLAG_GPU_DEVICE_LOST;
+         video_driver_modify_disp_flags(VIDEO_FLAG_GPU_DEVICE_LOST, 0);
          return false;
       }
    }

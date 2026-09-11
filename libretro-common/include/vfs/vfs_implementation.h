@@ -33,6 +33,15 @@ RETRO_BEGIN_DECLS
 
 libretro_vfs_implementation_file *retro_vfs_file_open_impl(const char *path, unsigned mode, unsigned hints);
 
+/* Deallocate a range of a file without changing its length; see
+ * filestream_punch_hole. Returns 0 on success, -1 when the platform or
+ * filesystem cannot do it. */
+int retro_vfs_file_punch_hole_impl(libretro_vfs_implementation_file *stream, int64_t offset, int64_t len);
+
+/* Allocation unit of the filesystem holding this file; see
+ * filestream_get_sparse_granularity. 0 when unknown. */
+int64_t retro_vfs_file_get_sparse_granularity_impl(libretro_vfs_implementation_file *stream);
+
 int retro_vfs_file_close_impl(libretro_vfs_implementation_file *stream);
 
 int retro_vfs_file_error_impl(libretro_vfs_implementation_file *stream);
@@ -81,6 +90,19 @@ int retro_vfs_stat_impl(const char *path, int32_t *size);
 int retro_vfs_stat_64_impl(const char *path, int64_t *size);
 
 int retro_vfs_mkdir_impl(const char *dir);
+
+/**
+ * retro_vfs_restrict_permissions_impl:
+ * @path : file to restrict
+ *
+ * Makes @path readable and writable by the owning user only, for
+ * files that hold secrets. On platforms without per-user file
+ * permissions (Windows profile directories, single-user consoles,
+ * Android SAF) there is nothing to do and the call succeeds.
+ *
+ * Returns: 0 on success, -1 on failure.
+ **/
+int retro_vfs_restrict_permissions_impl(const char *path);
 
 libretro_vfs_implementation_dir *retro_vfs_opendir_impl(const char *dir, bool include_hidden);
 

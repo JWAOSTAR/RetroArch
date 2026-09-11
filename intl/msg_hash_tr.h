@@ -1392,7 +1392,6 @@ static const struct
    char s_012938fb[30];
    char s_a747cdc9[57];
    char s_2f169651[18];
-   char s_73674a86[10];
    char s_705eee28[35];
    char s_62af62ac[36];
    char s_97379d00[23];
@@ -1515,7 +1514,6 @@ static const struct
    char s_74b77b4a[22];
    char s_7534cfc9[9];
    char s_36259b63[20];
-   char s_37368130[16];
    char s_d51f54a2[15];
    char s_b35f573c[8];
    char s_1cad7751[10];
@@ -1920,6 +1918,7 @@ static const struct
    char s_519cd5f8[18];
    char s_43ac80a0[14];
    char s_6959ce80[16];
+   char s_aa628249[12];
    char s_ebe994b4[16];
    char s_1c62c301[11];
    char s_a8bb35b6[13];
@@ -3320,7 +3319,6 @@ static const struct
    char s_36033606[231];
    char s_2e69508b[329];
    char s_7e96b5ce[43];
-   char s_3547866d[121];
    char s_c2314d30[222];
 #if defined(RARCH_MOBILE)
    char s_82c9e375[152];
@@ -3432,6 +3430,7 @@ static const struct
    char s_ec5751c3[40];
    char s_af4b70f4[51];
    char s_d9afe3b5[41];
+   char s_70ecb843[12];
    char s_312fd783[59];
    char s_96df643a[98];
    char s_150b4ebe[97];
@@ -5629,7 +5628,6 @@ static const struct
    "K\303\274\303\247\303\274k Resim \303\226l\303\247ek Etkeni",
    "Oynatma Listesi Adlar\304\261n\304\261 Kes (Yeniden ba\305\237lat\304\261lmal\304\261)",
    "PAL60 Kipi Kullan",
-   "Ana Dizin",
    "Men\303\274 Etkinken \304\260\303\247eri\304\237i Duraklat",
    "Etkin De\304\237ilken \304\260\303\247eri\304\237i Duraklat",
    "Performans Saya\303\247lar\304\261",
@@ -5756,7 +5754,6 @@ static const struct
    "&\303\207ekirde\304\237i \303\207\304\261kart",
    "&Yard\304\261m",
    "RetroArch Hakk\304\261nda",
-   "Kat\304\261l\304\261mc\304\261lar",
    "Dok\303\274mantasyon",
    "Temizle",
    "&Ara\303\247lar",
@@ -6177,6 +6174,7 @@ static const struct
    "\304\260\305\237letim sistemi",
    "Git S\303\274r\303\274m\303\274",
    "Lakka S\303\274r\303\274m\303\274",
+   "\304\260lerleyi\305\237",
    "G\303\274\303\247 Kayna\304\237\304\261",
    "\305\236arj oldu",
    "\305\236arj oluyor",
@@ -8470,8 +8468,6 @@ static const struct
    "re h\304\261z\304\261 sa\304\237lar. 60 Hz ekranda 30 fps i\303\247erik veya 120 Hz ekranda 60 f"
    "ps i\303\247erik.",
    "Video e\305\237itleme ayarlar\304\261n\304\261 de\304\237i\305\237tirin.",
-   "Gecikme ve daha fazla video tak\304\261lma pahas\304\261na performans\304\261 art\304\261r\304"
-   "\261r. Yaln\304\261zca tam h\304\261z elde edemiyorsan\304\261z kullan\304\261n.",
    "Metal arg\303\274man arabelleklerini kullanarak performans\304\261 art\304\261rmay\304\261 deney"
    "in. Baz\304\261 \303\247ekirdekler buna ihtiya\303\247 duyabilir. Bu \303\266zellikle eski donan"
    "\304\261m veya i\305\237letim sistemi s\303\274r\303\274mlerinde baz\304\261 g\303\266lgelendiri"
@@ -8628,6 +8624,7 @@ static const struct
    "Bu oyunun herhangi bir ba\305\237ar\304\261m\304\261 yok.",
    "RetroAchievements oyun y\303\274klemesi ba\305\237ar\304\261s\304\261z: %s",
    "RetroAchievements: Oyun tan\304\261mlanamad\304\261.",
+   "Zorlay\304\261c\304\261",
    "Ba\305\237ar\304\261mlar Zorlu Mod, sunucu taraf\304\261ndan de\304\237i\305\237tirildi.",
    "Bir durum kayd\304\261 y\303\274klendi. Ba\305\237ar\304\261lar mevcut oturum i\303\247in Zorlu "
    "Kip devre d\304\261\305\237\304\261 b\304\261rak\304\261ld\304\261.",
@@ -9183,7 +9180,7 @@ static const struct
  * compiler that pads this struct fails here instead of
  * misindexing at runtime. */
 typedef char msg_hash_tr_blob_check[
-      (sizeof(msg_hash_tr_blob) == (171054u
+      (sizeof(msg_hash_tr_blob) == (170931u
 #ifdef ANDROID
        + 340u
 #endif
@@ -9800,7 +9797,6 @@ static const uint32_t msg_hash_tr_ids[] =
    (uint32_t)MENU_ENUM_LABEL_VALUE_ANDROID_INPUT_DISCONNECT_WORKAROUND,
    (uint32_t)MENU_ENUM_LABEL_VALUE_APPICON_SETTINGS,
    (uint32_t)MENU_ENUM_LABEL_VALUE_ASSETS_DIRECTORY,
-   (uint32_t)MENU_ENUM_LABEL_VALUE_AUDIO_BLOCK_FRAMES,
    (uint32_t)MENU_ENUM_LABEL_VALUE_AUDIO_DEVICE,
    (uint32_t)MENU_ENUM_LABEL_VALUE_AUDIO_DRIVER,
    (uint32_t)MENU_ENUM_LABEL_VALUE_AUDIO_DSP_PLUGIN,
@@ -10934,7 +10930,6 @@ static const uint32_t msg_hash_tr_ids[] =
    (uint32_t)MENU_ENUM_LABEL_VALUE_OZONE_THUMBNAIL_SCALE_FACTOR,
    (uint32_t)MENU_ENUM_LABEL_VALUE_OZONE_TRUNCATE_PLAYLIST_NAME,
    (uint32_t)MENU_ENUM_LABEL_VALUE_PAL60_ENABLE,
-   (uint32_t)MENU_ENUM_LABEL_VALUE_PARENT_DIRECTORY,
    (uint32_t)MENU_ENUM_LABEL_VALUE_PAUSE_LIBRETRO,
    (uint32_t)MENU_ENUM_LABEL_VALUE_PAUSE_NONACTIVE,
    (uint32_t)MENU_ENUM_LABEL_VALUE_PERFCNT_ENABLE,
@@ -11057,7 +11052,6 @@ static const uint32_t msg_hash_tr_ids[] =
    (uint32_t)MENU_ENUM_LABEL_VALUE_QT_MENU_FILE_UNLOAD_CORE,
    (uint32_t)MENU_ENUM_LABEL_VALUE_QT_MENU_HELP,
    (uint32_t)MENU_ENUM_LABEL_VALUE_QT_MENU_HELP_ABOUT,
-   (uint32_t)MENU_ENUM_LABEL_VALUE_QT_MENU_HELP_ABOUT_CONTRIBUTORS,
    (uint32_t)MENU_ENUM_LABEL_VALUE_QT_MENU_HELP_DOCUMENTATION,
    (uint32_t)MENU_ENUM_LABEL_VALUE_QT_MENU_SEARCH_CLEAR,
    (uint32_t)MENU_ENUM_LABEL_VALUE_QT_MENU_TOOLS,
@@ -11461,6 +11455,7 @@ static const uint32_t msg_hash_tr_ids[] =
    (uint32_t)MENU_ENUM_LABEL_VALUE_SYSTEM_INFO_FRONTEND_OS,
    (uint32_t)MENU_ENUM_LABEL_VALUE_SYSTEM_INFO_GIT_VERSION,
    (uint32_t)MENU_ENUM_LABEL_VALUE_SYSTEM_INFO_LAKKA_VERSION,
+   (uint32_t)MENU_ENUM_LABEL_VALUE_SYSTEM_INFO_PACING,
    (uint32_t)MENU_ENUM_LABEL_VALUE_SYSTEM_INFO_POWER_SOURCE,
    (uint32_t)MENU_ENUM_LABEL_VALUE_SYSTEM_INFO_POWER_SOURCE_CHARGED,
    (uint32_t)MENU_ENUM_LABEL_VALUE_SYSTEM_INFO_POWER_SOURCE_CHARGING,
@@ -12861,7 +12856,6 @@ static const uint32_t msg_hash_tr_ids[] =
    (uint32_t)MENU_ENUM_SUBLABEL_VIDEO_SMOOTH,
    (uint32_t)MENU_ENUM_SUBLABEL_VIDEO_SWAP_INTERVAL,
    (uint32_t)MENU_ENUM_SUBLABEL_VIDEO_SYNCHRONIZATION_SETTINGS,
-   (uint32_t)MENU_ENUM_SUBLABEL_VIDEO_THREADED,
    (uint32_t)MENU_ENUM_SUBLABEL_VIDEO_USE_METAL_ARG_BUFFERS,
 #if defined(RARCH_MOBILE)
    (uint32_t)MENU_ENUM_SUBLABEL_VIDEO_VIEWPORT_BIAS_PORTRAIT_X,
@@ -12973,6 +12967,7 @@ static const uint32_t msg_hash_tr_ids[] =
    (uint32_t)MSG_CHEEVOS_GAME_HAS_NO_ACHIEVEMENTS,
    (uint32_t)MSG_CHEEVOS_GAME_LOAD_FAILED,
    (uint32_t)MSG_CHEEVOS_GAME_NOT_IDENTIFIED,
+   (uint32_t)MSG_CHEEVOS_HARDCORE_MODE,
    (uint32_t)MSG_CHEEVOS_HARDCORE_MODE_CHANGED_BY_HOST,
    (uint32_t)MSG_CHEEVOS_HARDCORE_MODE_DISABLED,
    (uint32_t)MSG_CHEEVOS_HARDCORE_MODE_DISABLED_CHEAT,

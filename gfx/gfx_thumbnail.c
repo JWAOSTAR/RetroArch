@@ -34,6 +34,7 @@
 #include <queues/task_queue.h>
 
 #include "gfx_display.h"
+#include "gfx_anim_preview.h"
 #include "gfx_animation.h"
 #include <formats/data_transfer.h>
 
@@ -67,6 +68,7 @@
 #endif
 
 #include "../tasks/tasks_internal.h"
+#include <compat/strl.h>
 
 #define DEFAULT_GFX_THUMBNAIL_STREAM_DELAY  16.66667f * 3
 #define DEFAULT_GFX_THUMBNAIL_FADE_DURATION 166.66667f
@@ -291,6 +293,47 @@ static void gfx_thumbnail_init_fade(
 #define GFX_THUMB_ANIM_WINDOW_KEEP  (4 * 1024 * 1024)
 #define GFX_THUMB_ANIM_WINDOW_AHEAD (8 * 1024 * 1024)
 #define GFX_THUMB_ANIM_WINDOW_BACK  (8 * 1024 * 1024)
+/* Preview audio's own window over the same file.  The head must hold
+ * the container metadata for the stream's whole life (the AAC arm
+ * borrows the AudioSpecificConfig out of the moov, and a loop rewinds
+ * through it), so it is sized from the media floor plus slack rather
+ * than fixed.  LOOKAHEAD is what the feeder keeps committed ahead of
+ * the decoder's compressed frontier: at the 255 kbps of a typical
+ * stereo AAC track that is ~66 seconds of audio, against a feeder
+ * that ticks once per menu frame, so the decoder reaching the bound
+ * is a theoretical case rather than a paced one.  MARGIN trails it. */
+/* Ceiling on the bytes either feeder reads in ONE animate() tick.
+ * Both feeders run on the main thread, and window_extend performs its
+ * read synchronously, so before this cap the first tick after an open
+ * - and the first tick after every loop of a looping video - read the
+ * whole lookahead in one filestream_read: 8 MiB on the video window,
+ * a 400 ms frame stall on 20 MB/s storage, repeated at every lap.
+ * The budget spreads the same catch-up over consecutive vsyncs; the
+ * bytes that end up resident are identical, only never all at once.
+ *
+ * The values are rates, not tastes: at 60 ticks/s these sustain
+ * 30 MB/s of video and 15 MB/s of audio, an order of magnitude above
+ * any stream a thumbnail previews (a 100 Mbps master needs 12.5 MB/s;
+ * preview audio tops out three decimal orders below its budget), so
+ * the feeder gains on the decoder every tick it is behind and the
+ * steady state is unchanged.  The catch-up case the budget must not
+ * touch - a frontier behind the consumer, where pacing means faulting
+ * - is exempted inside feed_budget itself, not here. */
+#define GFX_THUMB_ANIM_FEED_BUDGET  (512 * 1024)
+#define GFX_THUMB_AUDIO_FEED_BUDGET (256 * 1024)
+
+#define GFX_THUMB_AUDIO_WINDOW_KEEP (2 * 1024 * 1024)
+#define GFX_THUMB_AUDIO_HEAD_SLACK  (1 * 1024 * 1024)
+#define GFX_THUMB_AUDIO_LOOKAHEAD   (2 * 1024 * 1024)
+#define GFX_THUMB_AUDIO_MARGIN      (1 * 1024 * 1024)
+/* Ceiling on that head.  The floor is only a proxy for where the
+ * metadata ends - it is the first sample's offset, which in a normal
+ * file sits just past the moov but in one whose media starts far in
+ * is nowhere near it.  Sizing the permanently resident head from an
+ * unclamped floor would commit gigabytes for a preview.  Past this,
+ * open with the clamp and let the decoder's bounded open decline:
+ * a container whose metadata will not fit simply gets no audio. */
+#define GFX_THUMB_AUDIO_HEAD_MAX    (32 * 1024 * 1024)
 /* Frame-duration handling: <= 0 is undefined by the container spec
  * (browsers substitute 100 ms); very small durations are floored so
  * a hostile file cannot request thousands of decodes per second. */
@@ -308,55 +351,8 @@ static void gfx_thumbnail_init_fade(
 #define GFX_THUMB_PREVIEW_AUDIO_NAME   "__gfx_thumb_preview"
 #endif
 
-/* Memory an active animation pins: the file buffer for its lifetime,
- * two XRGB canvases, and decoder working state - for MP4/H.264 a
- * decoded-picture buffer of reference and reorder pictures, bounded
- * generously at 24 I420 frames. px may be 0 before the stream has
- * been opened (file buffer only). */
-static uint64_t gfx_thumb_anim_mem_need(uint64_t file_len, uint64_t px)
-{
-   /* px * 4 * 3: the stream's decode canvas plus the two ping-pong
-    * upload buffers of the threaded animation path. */
-   return file_len + px * 4 * 3 + (px * 3 / 2) * 24 + (1 << 20);
-}
 
-/* Admission: scale with the heap when the platform reports free
- * memory, keep the static caps when it cannot (they return 0). */
-static bool gfx_thumb_anim_mem_ok(uint64_t file_len, uint64_t px)
-{
-   uint64_t free_mem = mem_stats_free();
-   if (free_mem)
-      return (file_len <= GFX_THUMB_ANIM_ABS_MAX_FILE)
-          && (gfx_thumb_anim_mem_need(file_len, px) <= free_mem / 4);
-   return (file_len <= GFX_THUMB_ANIM_MAX_FILE)
-       && (px == 0 || px <= GFX_THUMB_ANIM_MAX_PIXELS);
-}
 
-/* Admission for the windowed path.  A windowed open commits only the
- * head plus the sliding window, never the whole file, so the file
- * length no longer bounds the footprint - what matters is the window
- * and the decoder's own buffers.  Charge that instead, which is what
- * lets a multi-gigabyte video preview on a platform that could not
- * have held it.
- *
- * The file length is still bounded, but only by the absolute ceiling:
- * a file whose address space cannot be reserved at all is refused by
- * data_transfer_open_window itself, and on a platform with no
- * reservation the open degrades to a whole-file read - so fall back to
- * the unwindowed test there rather than admitting something the
- * fallback would then slurp. */
-static bool gfx_thumb_anim_window_ok(uint64_t px)
-{
-   uint64_t free_mem = mem_stats_free();
-   uint64_t win      = (uint64_t)GFX_THUMB_ANIM_WINDOW_KEEP
-                     + GFX_THUMB_ANIM_WINDOW_AHEAD
-                     + GFX_THUMB_ANIM_WINDOW_BACK;
-   if (free_mem)
-      return gfx_thumb_anim_mem_need(win, px) <= free_mem / 4;
-   /* No free-memory report: the window is a fixed, small footprint, so
-    * only the pixel cap still applies. */
-   return (px == 0 || px <= GFX_THUMB_ANIM_MAX_PIXELS);
-}
 
 enum gfx_thumb_anim_job_status
 {
@@ -371,10 +367,19 @@ enum gfx_thumb_anim_job_status
                                   keeps its meaning. */
 };
 
+/* The two jobs of an animation and their frame buffers come out of one
+ * block: job A at its start, job B one cache line in (the worker and
+ * the main thread hand the two back and forth, so they must not share
+ * a line), then the two frames, each on a 64-byte boundary. Job A's
+ * address is the block's; job B and both frame pointers are views. */
+#define GFX_THUMB_ANIM_JOB_STRIDE 64
+
 typedef struct gfx_thumb_anim_job
 {
    struct gfx_thumb_anim_job *next;  /* FIFO link (owned by the queue) */
    void     *stream;                 /* borrowed from the thumbnail    */
+   void     *sess;                   /* borrowed gfx_anim_preview_t,
+                                        NULL when not windowed        */
    uint32_t *frame;                  /* job-owned upload-ready pixels  */
    unsigned  width, height;
    int       duration_ms;            /* of the READY frame             */
@@ -405,12 +410,26 @@ static bool gfx_thumbnail_anim_job_step(gfx_thumb_anim_job_t *job)
    enum image_type_enum type = (enum image_type_enum)job->type;
    int duration_ms           = 0;
    size_t i, n;
-   /* Ask the stream to emit the upload order directly: the video
-    * streams bake it in their blit, which removes the per-pixel R/B
-    * swizzle pass below; WEBP always emits R,G,B,A and keeps the
-    * fallback conversion. */
+   /* Ask the stream to emit the upload order directly - the video
+    * streams bake it in their blit, WEBP and APNG in their canvas -
+    * which removes the per-pixel R/B swizzle pass below.  Every
+    * stream type honours it now; the fallback stays for one that
+    * cannot (and must answer "yes" to a repeat ask for the order it
+    * already emits, since this is asked per frame). */
    bool native_order         = image_transfer_anim_stream_set_argb(
          job->stream, type, job->use_rgba ? 0 : 1);
+
+   /* The window feed runs HERE, on the thread that decodes, not on
+    * the poll.  It reads the demuxer's cursor and stores its bound,
+    * and the decoder writes the one and reads the other on every
+    * packet: from the poll those were unsynchronised accesses to the
+    * stream while a job was RUNNING (TSan, gfx_thumbnail_anim harness,
+    * the moment a windowed WEBP gave the feed a cursor to read).  On
+    * this thread the stream and its transfer have one owner, which is
+    * the window's contract.  An I/O failure while extending means the
+    * decoder would hit the wall and loop early: end the animation. */
+   if (job->sess && !gfx_anim_preview_feed((gfx_anim_preview_t*)job->sess))
+      return false;
 
    if (!(frame = image_transfer_anim_stream_next(job->stream, type,
          &duration_ms)))
@@ -578,115 +597,33 @@ void gfx_thumbnail_anim_worker_deinit(void)
 void gfx_thumbnail_anim_worker_deinit(void) { }
 #endif
 
-#if defined(GFX_THUMB_PREVIEW_AUDIO)
-/* The thumbnail currently holding the (single) preview-audio mixer
- * stream, and the granted slot. Main thread only. */
-static const gfx_thumbnail_t *gfx_thumb_audio_owner = NULL;
-static int                    gfx_thumb_audio_slot  = -1;
-
-static void gfx_thumbnail_preview_audio_stop(const gfx_thumbnail_t *owner)
-{
-   if (gfx_thumb_audio_owner != owner)
-      return;
-   if (gfx_thumb_audio_slot >= 0)
-   {
-      /* Only touch the slot if it still holds our stream (another
-       * subsystem may have replaced it). */
-      const char *name = audio_driver_mixer_get_stream_name(
-            (unsigned)gfx_thumb_audio_slot);
-      if (name && string_is_equal(name, GFX_THUMB_PREVIEW_AUDIO_NAME))
-         audio_driver_mixer_remove_stream((unsigned)gfx_thumb_audio_slot);
-   }
-   gfx_thumb_audio_owner = NULL;
-   gfx_thumb_audio_slot  = -1;
-}
-
-static void gfx_thumbnail_preview_audio_start(gfx_thumbnail_t *thumbnail,
-      void *container, size_t container_size, enum image_type_enum type)
-{
-   audio_mixer_stream_params_t params;
-   int out_slot = -1;
-   void *copy;
-
-   /* One preview stream at a time */
-   gfx_thumbnail_preview_audio_stop(gfx_thumb_audio_owner);
-
-   /* The mixer decodes the container incrementally on the audio flush,
-    * so it must own bytes that outlive this thumbnail: the animation's
-    * own buffer is released the moment the entry is deselected, and
-    * for a windowed transfer it is a sliding mapping whose pages move
-    * under the video decoder.  Hand the mixer its own copy.
-    *
-    * That copy is the compressed container, not decoded PCM: the audio
-    * a stream voice holds decoded at any moment is a ring of about a
-    * hundred milliseconds, so the footprint no longer scales with the
-    * clip's length the way a fully decoded WAV did. */
-   if (!(copy = malloc(container_size)))
-      return;
-   memcpy(copy, container, container_size);
-
-   params.buf                 = copy;
-   params.bufsize             = container_size;
-   params.basename            = strdup(GFX_THUMB_PREVIEW_AUDIO_NAME);
-   params.cb                  = NULL;
-   /* Donate the container bytes: audio_mixer_destroy takes ownership
-    * and releases them on every teardown path, so the caller must not
-    * free them afterwards. */
-   params.buf_owner           = copy;
-   params.buf_owner_free      = free;
-   params.out_slot            = &out_slot;
-   params.slot_selection_idx  = 0;
-   params.volume              = 1.0f;
-   params.slot_selection_type = AUDIO_MIXER_SLOT_SELECTION_AUTOMATIC;
-   params.stream_type         = AUDIO_STREAM_TYPE_SYSTEM;
-   /* Stream the container's audio track rather than pre-decoding it.
-    * Both arms pick the audio track out of an A/V file themselves, so
-    * the video track's presence is irrelevant here. */
-   params.type                = (type == IMAGE_TYPE_WEBM)
-                                 ? AUDIO_MIXER_TYPE_WEBA
-                                 : AUDIO_MIXER_TYPE_M4A;
-   params.state               = AUDIO_STREAM_STATE_PLAYING_LOOPED;
-
-   if (!audio_driver_mixer_add_stream(&params))
-   {
-      free(params.basename);
-      /* add_stream releases the donated buffer on its failure paths */
-      return;
-   }
-   /* add_stream reports the granted slot directly; the sentinel name
-    * remains only as the staleness guard at stop time, where the slot
-    * may since have been handed to another subsystem. */
-   gfx_thumb_audio_slot  = out_slot;
-   gfx_thumb_audio_owner = thumbnail;
-}
-#endif /* GFX_THUMB_PREVIEW_AUDIO */
-
 static void gfx_thumbnail_anim_close(gfx_thumbnail_t *thumbnail)
 {
 #ifdef HAVE_THREADS
+   /* Both jobs and their frames live in the block that anim_job
+    * addresses; pull each off the queue, then free once. */
+   if (thumbnail->anim_job2)
+      gfx_thumbnail_anim_job_release(
+            (gfx_thumb_anim_job_t*)thumbnail->anim_job2);
    if (thumbnail->anim_job)
    {
-      gfx_thumb_anim_job_t *job = (gfx_thumb_anim_job_t*)thumbnail->anim_job;
-      gfx_thumbnail_anim_job_release(job);
-      free(job->frame);
-      free(job);
-      thumbnail->anim_job = NULL;
+      gfx_thumbnail_anim_job_release(
+            (gfx_thumb_anim_job_t*)thumbnail->anim_job);
+      free(thumbnail->anim_job);
    }
-   if (thumbnail->anim_job2)
-   {
-      gfx_thumb_anim_job_t *job = (gfx_thumb_anim_job_t*)thumbnail->anim_job2;
-      gfx_thumbnail_anim_job_release(job);
-      free(job->frame);
-      free(job);
-      thumbnail->anim_job2 = NULL;
-   }
+   thumbnail->anim_job  = NULL;
+   thumbnail->anim_job2 = NULL;
    thumbnail->anim_job_upload = 0;
 #endif
-#if defined(GFX_THUMB_PREVIEW_AUDIO)
-   /* Stopping the mixer stream is the whole teardown now: it releases
-    * the decoder and the container bytes it owns. */
-   gfx_thumbnail_preview_audio_stop(thumbnail);
-#endif
+   /* The shared preview session (gfx_anim_preview) drives the window
+    * feeder and the preview audio; it borrows the stream and mapping
+    * owned below, so stop its audio and release just the session. */
+   if (thumbnail->anim_sess)
+   {
+      gfx_anim_preview_audio_stop((gfx_anim_preview_t*)thumbnail->anim_sess);
+      gfx_anim_preview_release((gfx_anim_preview_t*)thumbnail->anim_sess);
+      thumbnail->anim_sess = NULL;
+   }
    if (thumbnail->anim)
       image_transfer_anim_stream_free(thumbnail->anim,
             (enum image_type_enum)thumbnail->anim_type);
@@ -721,39 +658,10 @@ static void gfx_thumbnail_anim_close(gfx_thumbnail_t *thumbnail)
  * stream/buf/xfer transfers in every outcome; on rejection they
  * are released and the static thumbnail stays.  Returns true when the
  * animation was installed. */
-#if defined(GFX_THUMB_PREVIEW_AUDIO)
-/* Preview audio (opt-in): decode the file's audio track to PCM and
- * loop it through the mixer while the animation is shown. WebM and
- * MP4 only (animated WebP has no audio). With threads the decode
- * runs on the shared worker; without, it runs here once (a one-shot
- * cost when the preview opens).  Called from anim_install for a
- * fully-resident buffer, or deferred to the moment the adopted read
- * completes: this path hands the decoder the whole buffer (src_len is
- * the full length), so it must run after the read finishes.  The
- * decoder itself can decode from a prefix - rmp4/rwebm_audio_decode_
- * wav_avail stop at the resident wall and report need_more when the
- * moov is not yet in - but feeding it a growing buffer from the
- * worker while the render thread pumps the read is a cross-thread
- * hand-off this path does not yet do. */
-static void gfx_thumbnail_anim_audio_begin(gfx_thumbnail_t *thumbnail)
-{
-   enum image_type_enum type = (enum image_type_enum)thumbnail->anim_type;
-   if (     (   (type == IMAGE_TYPE_WEBM)
-             || (type == IMAGE_TYPE_MP4))
-         && config_get_ptr()->bools.menu_thumbnail_preview_audio)
-      /* The mixer streams the container's audio track, decoding it on
-       * the audio flush as it plays.  There is nothing to decode up
-       * front, so no worker job and no waiting for one to finish -
-       * playback starts here and the clip is no longer truncated to a
-       * fixed preview length. */
-      gfx_thumbnail_preview_audio_start(thumbnail,
-            thumbnail->anim_buf, thumbnail->anim_buf_len, type);
-}
-#endif
-
 static bool gfx_thumbnail_anim_install(gfx_thumbnail_t *thumbnail,
       void *stream, enum image_type_enum type,
-      void *buf, size_t len, struct data_transfer *xfer, int windowed)
+      void *buf, size_t len, struct data_transfer *xfer, int windowed,
+      const char *path)
 {
    unsigned anim_w          = 0;
    unsigned anim_h          = 0;
@@ -780,14 +688,13 @@ static bool gfx_thumbnail_anim_install(gfx_thumbnail_t *thumbnail,
    {
       uint64_t charge = (uint64_t)len;
       if (xfer && data_transfer_window_is_reserved(xfer))
-         charge = (uint64_t)GFX_THUMB_ANIM_WINDOW_KEEP
-                + GFX_THUMB_ANIM_WINDOW_AHEAD
-                + GFX_THUMB_ANIM_WINDOW_BACK;
+         charge = (uint64_t)GFX_ANIM_PREVIEW_WINDOW_KEEP
+                + GFX_ANIM_PREVIEW_WINDOW_AHEAD
+                + GFX_ANIM_PREVIEW_WINDOW_BACK;
       if (   (num_frames < 2)
           || (anim_w < 1)
           || (anim_h < 1)
-          || !gfx_thumb_anim_mem_ok(charge,
-                (uint64_t)anim_w * anim_h))
+          || !gfx_anim_preview_admit(charge, (uint64_t)anim_w * anim_h))
          goto fail;
    }
 
@@ -845,10 +752,13 @@ static bool gfx_thumbnail_anim_install(gfx_thumbnail_t *thumbnail,
           && !windowed
           && !data_transfer_complete(thumbnail->anim_dt)) ? 1 : 0;
 
-#if defined(GFX_THUMB_PREVIEW_AUDIO)
-   if (!thumbnail->anim_read_pending)
-      gfx_thumbnail_anim_audio_begin(thumbnail);
-#endif
+   /* The shared session over the same stream / mapping: it feeds the
+    * window and plays the preview audio, as the companions' panes do. */
+   thumbnail->anim_sess = gfx_anim_preview_wrap(stream, type,
+         thumbnail->anim_dt, (const uint8_t*)buf, len,
+         windowed ? true : false, path);
+   if (thumbnail->anim_sess && !thumbnail->anim_read_pending)
+      gfx_anim_preview_audio_begin((gfx_anim_preview_t*)thumbnail->anim_sess);
    return true;
 
 fail:
@@ -861,230 +771,295 @@ fail:
    return false;
 }
 
-static void gfx_thumbnail_anim_open(gfx_thumbnail_t *thumbnail,
-      const char *path)
+/* png_probe carries what the still-load task already learned about a
+ * PNG from the buffer it read anyway: < 0 unknown (probe the file), 0
+ * conclusively still (return without opening anything), 1 APNG (skip
+ * the probe). Only consulted for IMAGE_TYPE_PNG. */
+static void gfx_thumbnail_anim_open_probed(gfx_thumbnail_t *thumbnail,
+      const char *path, int png_probe)
 {
-   enum image_type_enum type;
-   int64_t len              = 0;
-   void *buf                = NULL;
-   void *stream             = NULL;
+   gfx_anim_preview_t *p;
 
    gfx_thumbnail_anim_close(thumbnail);
 
    if (string_is_empty(path))
       return;
 
-   /* Cheap gate: only container types with an animation decoder.
-    * PNG is included for APNG. */
-   type = image_texture_get_type(path);
-   if (   (type != IMAGE_TYPE_PNG)
-       && (type != IMAGE_TYPE_WEBP)
-       && (type != IMAGE_TYPE_WEBM)
-       && (type != IMAGE_TYPE_MP4))
+   /* The sliding-window progressive open, the APNG probe and the memory
+    * admission live in gfx_anim_preview (shared with the desktop
+    * companions' preview panes). NULL: a still, or not admitted - keep
+    * the static thumbnail. */
+   if (!(p = gfx_anim_preview_open(path, png_probe)))
       return;
 
-#ifdef HAVE_RPNG
-   /* PNG is the dominant thumbnail format and almost all of them are
-    * still images, so deciding "animated?" only after reading the whole
-    * file would add a full extra read to the common path.  APNG puts
-    * its acTL control chunk before the first IDAT, i.e. within the
-    * first few hundred bytes, so probe a small header window first and
-    * bail out early for ordinary PNGs. */
-   if (type == IMAGE_TYPE_PNG)
+   /* Hand the stream and the mapping to the thumbnail (install borrows
+    * them exactly as before) and rebuild the session there over the
+    * same objects. */
    {
-      /* Heap-held: this runs on the menu hot path from task threads,
-       * where 4 KiB is half the smallest thread stack in the tree.
-       * On allocation failure the file is treated as a still image --
-       * the same documented fallback as every other inconclusive
-       * probe below. */
-      uint8_t *probe;
-      int64_t  got  = 0;
-      int      more = 0;
-      RFILE   *fp   = filestream_open(path,
-            RETRO_VFS_FILE_ACCESS_READ, RETRO_VFS_FILE_ACCESS_HINT_NONE);
-      if (!fp)
-         return;
-      if (!(probe = (uint8_t*)malloc(4096)))
-      {
-         filestream_close(fp);
-         return;
-      }
-      got = filestream_read(fp, probe, 4096);
-      filestream_close(fp);
-      if (got <= 0)
-      {
-         free(probe);
-         return;
-      }
-      if (!rpng_is_apng_ex(probe, (size_t)got, &more))
-      {
-         /* Conclusive "still PNG" - or the acTL would lie beyond this
-          * window, which only happens with unusually large ancillary
-          * chunks ahead of it.  Treating that as still keeps the hot
-          * path cheap; such a file simply shows its default image, the
-          * behaviour before APNG support existed. */
-         (void)more;
-         free(probe);
-         return;
-      }
-      free(probe);
-   }
-#endif
-
-   /* Open the file as a sliding window: address space for the whole
-    * file is reserved, but only [tell - margin, tell + lookahead) is
-    * ever committed, so a long video costs its window rather than its
-    * length.  The demuxers borrow a fixed base pointer (stable across
-    * extends by the reserve model) and are already avail-aware, and
-    * the feeder below keeps the window ahead of the decode frontier.
-    *
-    * On a platform with no address-space reservation
-    * data_transfer_open_window fills the whole file before returning,
-    * so the absolute bound has to be applied BEFORE the open there -
-    * checking afterwards would mean the multi-hundred-MB read had
-    * already happened, which is the allocation spike the cap exists to
-    * prevent.  Where the reservation works the open reads only the
-    * head, so the bound can come from the length the open reports and
-    * the extra stat is skipped: this runs on the menu hot path for
-    * every entry the user highlights, and on slow storage that
-    * round-trip is not free.
-    *
-    * The capability is asked for at runtime rather than tested with a
-    * macro: DT_HAVE_RESERVE is private to data_transfer.c, so a
-    * compile-time check here would silently take the wrong branch
-    * everywhere. */
-   if (!data_transfer_reserve_supported())
-   {
-      int64_t fsz = path_get_size(path);
-      if (fsz <= 0 || fsz > GFX_THUMB_ANIM_ABS_MAX_FILE)
-         return;
-   }
-   {
-      data_transfer_t *dt = data_transfer_open_window(path,
-            GFX_THUMB_ANIM_WINDOW_KEEP);
-      const uint8_t   *base;
-      size_t           blen = 0;
-      bool             reserved;
-
-      if (!dt)
-         return;
-      reserved = data_transfer_window_is_reserved(dt);
-      if (!(base = data_transfer_window_base(dt, &blen)) || blen == 0)
-      {
-         data_transfer_free(dt);
-         return;
-      }
-      /* The absolute file-length cap protects the fully-resident
-       * loads; a reserved window commits only its fixed head+window
-       * budget no matter how long the file is, so length is not a
-       * cost there - a two-hour 4K recording previews from the same
-       * 20 MiB as a ten-second clip. */
-      if (   (!reserved && blen > GFX_THUMB_ANIM_ABS_MAX_FILE)
-          || !(reserved ? gfx_thumb_anim_window_ok(0)
-                        : gfx_thumb_anim_mem_ok((uint64_t)blen, 0)))
-      {
-         data_transfer_free(dt);
-         return;
-      }
-
-      /* The demuxer must see the whole logical length; only the head is
-       * resident at this point, so open progressively and grow the
-       * window until the header/index is covered. */
-      {
-         int need_more = 0;
-         size_t need_lo = 0, need_hi = 0;
-         size_t avail  = GFX_THUMB_ANIM_WINDOW_KEEP;
-         int    jumps  = 0;
-         if (avail > blen)
-            avail = blen;
-         for (;;)
-         {
-            stream = image_transfer_anim_stream_new_avail(
-                  (void*)base, blen, avail, type, &need_more,
-                  &need_lo, &need_hi);
-            if (stream || !need_more || avail >= blen)
-               break;
-            if (need_hi > need_lo && need_hi > avail && need_hi <= blen)
-            {
-               /* The demuxer named the exact bytes that unblock it -
-                * a box header past the wall, or a trailing moov body.
-                * Committing just that island skips the mdat between
-                * the frontier and the metadata, which is what makes a
-                * multi-gigabyte tail-moov recording open from a
-                * few-MiB footprint instead of paging the whole file
-                * through the window.  The jump cap only guards
-                * against a demuxer bug looping without progress;
-                * a well-formed file needs one or two. */
-               if (++jumps > 64 ||
-                   !data_transfer_window_ensure(dt, need_lo, need_hi))
-                  break;
-               avail = need_hi;
-               continue;
-            }
-            /* No range named (WEBM, or a stall at unread front
-             * bytes): the historical sequential growth. */
-            avail += GFX_THUMB_ANIM_WINDOW_KEEP;
-            if (avail > blen)
-               avail = blen;
-            if (!data_transfer_window_extend(dt, avail))
-               break;
-         }
-         if (stream && jumps)
-         {
-            /* The open jumped over the media to reach a trailing
-             * moov; the sequential read frontier is still at the
-             * head.  Restart it at the media floor and prime one
-             * window so the first frames decode from resident bytes,
-             * after which the animate feeder streams as usual. */
-            size_t fl = image_transfer_anim_stream_media_floor(stream,
-                  type);
-            size_t hi = fl + GFX_THUMB_ANIM_WINDOW_KEEP
-                  + GFX_THUMB_ANIM_WINDOW_AHEAD;
-            if (hi > blen)
-               hi = blen;
-            data_transfer_window_rebase(dt, fl);
-            if (!data_transfer_window_extend(dt, hi))
-            {
-               image_transfer_anim_stream_free(stream, type);
-               stream = NULL;
-            }
-         }
-
-         /* Types without a progressive open (animated WEBP) return
-          * NULL with need_more clear: fall back to the whole buffer,
-          * which the window has to make resident. */
-         if (!stream && !need_more)
-         {
-            if (data_transfer_window_extend(dt, blen))
-               stream = image_transfer_anim_stream_new(
-                     (void*)base, blen, type);
-         }
-      }
-
-      if (!stream)
-      {
-         /* still image or malformed: keep static thumbnail */
-         data_transfer_free(dt);
-         return;
-      }
-
-      buf = (void*)base;
-      len = (int64_t)blen;
-      /* The transfer owns the mapping; the install borrows it. */
+      void *stream              = p->stream;
+      struct data_transfer *dt  = p->dt;
+      const uint8_t *base       = p->base;
+      size_t blen               = p->len;
+      enum image_type_enum type = p->type;
+      /* Carry the session's real windowed flag into install, not a
+       * hardcoded 1: gfx_anim_preview_open() sets it to whether the
+       * mapping is a reservation (data_transfer_window_is_reserved).
+       * Where reservation is unavailable the open degrades to a
+       * whole-file read and the flag is false - install must then
+       * charge the whole file to memory admission and skip the sliding-
+       * window feed, or a multi-GB video is admitted as if it cost one
+       * small window and the feeder chases a frontier in an already
+       * fully resident buffer. */
+      int windowed              = gfx_anim_preview_windowed(p) ? 1 : 0;
+      p->stream = NULL;
+      p->dt     = NULL;
+      gfx_anim_preview_release(p);
       gfx_thumbnail_anim_install(thumbnail, stream, type,
-            buf, (size_t)len, dt, 1);
+            (void*)base, blen, dt, windowed, path);
    }
+}
+
+/* The historical entry point, and the symbol the anim oracle in
+ * samples/gfx/gfx_thumbnail_anim globalizes and drives directly: no
+ * task in sight there, so no verdict to pass - probe the file, as
+ * this path always has. */
+static void gfx_thumbnail_anim_open(gfx_thumbnail_t *thumbnail,
+      const char *path)
+{
+   gfx_thumbnail_anim_open_probed(thumbnail, path, -1);
+}
+
+/* Video containers open over a sliding window before anything else:
+ * the still task reads the whole file into memory, which a
+ * multi-gigabyte recording fails outright (the allocation) or turns
+ * into a minute of disk reads for one frame - while the windowed
+ * animation path holds a fixed few-MiB footprint at any length, and
+ * its first decoded frame doubles as the still.
+ *
+ * Returns true when the window took and the thumbnail is now PENDING
+ * on it.  A false return (not a video, admission refused, no
+ * reservation support, malformed container) leaves the thumbnail
+ * untouched for the caller to fall through to the historical
+ * whole-file still decode, which keeps small files on exotic
+ * platforms working exactly as before. */
+static bool gfx_thumbnail_try_video_open(gfx_thumbnail_t *thumbnail,
+      const char *path)
+{
+   enum image_type_enum ptype;
+
+   if (!thumbnail || string_is_empty(path))
+      return false;
+
+   ptype = image_texture_get_type(path);
+   if (   (ptype != IMAGE_TYPE_WEBM)
+       && (ptype != IMAGE_TYPE_MP4)
+       && (ptype != IMAGE_TYPE_WEBP))
+      return false;
+   /* An animated WEBP takes the same anim-first route as a video: its
+    * still decode read and parsed the whole file for the first frame,
+    * which the animation then decoded again from its window.  A still
+    * WEBP is told apart by its first chunk (32 bytes) and keeps the
+    * still task.  PNG stays on the still task: a playlist's stills are
+    * PNGs, and that task supplies the APNG verdict from the bytes it
+    * reads anyway, where a probe here would be an extra open per
+    * thumbnail. */
+   if (ptype == IMAGE_TYPE_WEBP && gfx_anim_preview_probe(path) != 1)
+      return false;
+
+   gfx_thumbnail_anim_open(thumbnail, path);
+   if (!thumbnail->anim)
+      return false;
+
+   thumbnail->list_id = gfx_thumb_st.list_id;
+   GFX_THUMB_STATUS_STORE(&thumbnail->status,
+         GFX_THUMBNAIL_STATUS_PENDING);
+   return true;
 }
 
 /* Uploads one final-format animation frame as the thumbnail's texture.
  * 'pixels' must already be in the format the video driver expects
  * ('use_rgba' describes it). Runs on the main thread. */
+/* --- Asynchronous uploads ------------------------------------------
+ * Under threaded video video_driver_texture_load() is a round trip to
+ * the video thread that the main thread waits out - up to one present
+ * per upload. Thumbnails are the most frequent upload the menu makes
+ * (one per row while scrolling, one per frame for a playing preview),
+ * so they go through video_driver_texture_load_async(): the image is
+ * handed over, the handle comes back through a done() callback on the
+ * main thread at a later frame. The ticket below is what done() gets.
+ * It is validated against the list generation and the thumbnail's own
+ * upload sequence, both bumped by the same events that would have made
+ * the synchronous write wrong. Without the wrapper the same calls
+ * complete synchronously and behave exactly as before. */
+
+typedef struct
+{
+   gfx_thumbnail_t *thumbnail;
+   uint64_t list_id;
+   uint16_t upload_seq;
+   unsigned width;
+   unsigned height;
+   bool is_anim_frame;
+} gfx_thumbnail_upload_ticket_t;
+
+static void gfx_thumbnail_upload_release(void *img)
+{
+   struct texture_image *ti = (struct texture_image*)img;
+   if (ti)
+   {
+      image_texture_free(ti);
+      free(ti);
+   }
+}
+
+/* Main thread. Installs @handle on the ticket's thumbnail if the
+ * upload is still wanted; unloads it otherwise. */
+static void gfx_thumbnail_upload_done(void *user, uintptr_t handle)
+{
+   gfx_thumbnail_upload_ticket_t *t = (gfx_thumbnail_upload_ticket_t*)user;
+   gfx_thumbnail_state_t *p_gfx_thumb = &gfx_thumb_st;
+   gfx_thumbnail_t *thumbnail;
+   bool wanted;
+
+   if (!t)
+      return;
+   thumbnail = t->thumbnail;
+   wanted    =    t->list_id    == p_gfx_thumb->list_id
+               && t->upload_seq == thumbnail->upload_seq;
+
+   if (t->is_anim_frame)
+   {
+      /* Whatever happened, this frame is no longer in flight. Only
+       * clear it when the ticket is current: after a reset the flag
+       * already belongs to the next request. */
+      if (wanted)
+         thumbnail->anim_inflight = 0;
+      if (!wanted || !handle)
+      {
+         if (handle)
+            video_driver_texture_unload(&handle);
+         free(t);
+         return;
+      }
+      if (thumbnail->texture)
+         video_driver_texture_unload(&thumbnail->texture);
+      thumbnail->texture = handle;
+      thumbnail->width   = t->width;
+      thumbnail->height  = t->height;
+      if (GFX_THUMB_STATUS_LOAD(&thumbnail->status) ==
+            GFX_THUMBNAIL_STATUS_PENDING)
+      {
+         GFX_THUMB_STATUS_STORE(&thumbnail->status,
+               GFX_THUMBNAIL_STATUS_AVAILABLE);
+         gfx_thumbnail_init_fade(p_gfx_thumb, thumbnail);
+      }
+      free(t);
+      return;
+   }
+
+   /* The still. Wanted only while the request that posted it is the
+    * one still pending; an animation frame that got there first is
+    * newer than this still and keeps its texture. */
+   if (     !wanted
+         || GFX_THUMB_STATUS_LOAD(&thumbnail->status) != GFX_THUMBNAIL_STATUS_PENDING)
+   {
+      if (handle)
+         video_driver_texture_unload(&handle);
+      free(t);
+      return;
+   }
+   if (!handle)
+   {
+      GFX_THUMB_STATUS_STORE(&thumbnail->status, GFX_THUMBNAIL_STATUS_MISSING);
+      gfx_thumbnail_init_fade(p_gfx_thumb, thumbnail);
+      free(t);
+      return;
+   }
+   if (thumbnail->texture)
+   {
+      /* An animation frame landed first: newer, keep it. */
+      video_driver_texture_unload(&handle);
+   }
+   else
+   {
+      thumbnail->texture = handle;
+      thumbnail->width   = t->width;
+      thumbnail->height  = t->height;
+   }
+   /* Release-store: texture/width/height are visible before the video
+    * thread can see AVAILABLE in gfx_thumbnail_draw(). */
+   GFX_THUMB_STATUS_STORE(&thumbnail->status, GFX_THUMBNAIL_STATUS_AVAILABLE);
+   gfx_thumbnail_init_fade(p_gfx_thumb, thumbnail);
+   free(t);
+}
+
+static gfx_thumbnail_upload_ticket_t *gfx_thumbnail_upload_ticket(
+      gfx_thumbnail_t *thumbnail, unsigned width, unsigned height,
+      bool is_anim_frame)
+{
+   gfx_thumbnail_upload_ticket_t *t =
+      (gfx_thumbnail_upload_ticket_t*)malloc(sizeof(*t));
+   if (!t)
+      return NULL;
+   t->thumbnail     = thumbnail;
+   t->list_id       = gfx_thumb_st.list_id;
+   t->upload_seq    = thumbnail->upload_seq;
+   t->width         = width;
+   t->height        = height;
+   t->is_anim_frame = is_anim_frame;
+   return t;
+}
+
 static void gfx_thumbnail_anim_upload(gfx_thumbnail_t *thumbnail,
       const uint32_t *pixels, unsigned width, unsigned height,
       bool use_rgba)
 {
    struct texture_image img;
    uintptr_t new_texture = 0;
+
+#ifdef HAVE_THREADS
+   /* Threaded video: the decoder's buffer is reused for the next
+    * frame, so the wrapper gets its own copy. One frame in flight per
+    * thumbnail; a frame decoded while one is still travelling is
+    * skipped, which is what a slow present would have shown anyway.
+    * The copy is a few hundred microseconds at most; the wait it
+    * replaces was up to a present. */
+   if (video_driver_thread_wrapper_active())
+   {
+      struct texture_image *heap;
+      gfx_thumbnail_upload_ticket_t *t;
+      size_t bytes = (size_t)width * (size_t)height * sizeof(uint32_t);
+
+      if (thumbnail->anim_inflight)
+         return;
+      if (!(heap = (struct texture_image*)calloc(1, sizeof(*heap))))
+         return;
+      if (!(heap->pixels = (uint32_t*)malloc(bytes)))
+      {
+         free(heap);
+         return;
+      }
+      memcpy(heap->pixels, pixels, bytes);
+      heap->width         = width;
+      heap->height        = height;
+      heap->supports_rgba = use_rgba;
+      if (!(t = gfx_thumbnail_upload_ticket(thumbnail, width, height, true)))
+      {
+         gfx_thumbnail_upload_release(heap);
+         return;
+      }
+      thumbnail->anim_inflight = 1;
+      if (!video_driver_texture_load_async(heap, TEXTURE_FILTER_LINEAR,
+               gfx_thumbnail_upload_done, t, gfx_thumbnail_upload_release))
+      {
+         thumbnail->anim_inflight = 0;
+         gfx_thumbnail_upload_release(heap);
+         free(t);
+      }
+      return;
+   }
+#endif
+
 
    img.width         = width;
    img.height        = height;
@@ -1111,8 +1086,18 @@ static void gfx_thumbnail_anim_upload(gfx_thumbnail_t *thumbnail,
        * as with the still upload. */
       if (GFX_THUMB_STATUS_LOAD(&thumbnail->status) ==
             GFX_THUMBNAIL_STATUS_PENDING)
+      {
          GFX_THUMB_STATUS_STORE(&thumbnail->status,
                GFX_THUMBNAIL_STATUS_AVAILABLE);
+         /* ...and start the fade the still upload would have started.
+          * gfx_thumbnail_reset zeroes alpha, and the request's end:
+          * label skips init_fade precisely because the status it sees
+          * is PENDING - so on this route nothing else ever raises it.
+          * The texture was live and the status correct, but every
+          * frame drew at zero opacity: a video preview that decoded
+          * perfectly and was invisible. */
+         gfx_thumbnail_init_fade(&gfx_thumb_st, thumbnail);
+      }
    }
 }
 
@@ -1192,38 +1177,14 @@ void gfx_thumbnail_animate(gfx_thumbnail_t *thumbnail)
    now  = cpu_features_get_time_usec();
    type = (enum image_type_enum)thumbnail->anim_type;
 
-   /* Windowed playback: keep the committed range straddling the
-    * decoder's byte frontier.  The demuxers report a monotonic
-    * consumed offset (the end of the last packet handed out) and a
-    * fixed media floor, so the feeder can decommit behind and commit
-    * ahead without ever touching the range the decoder is reading.
-    * The margin exceeds the largest single frame's packet by orders of
-    * magnitude, which is what makes the decommit disjoint from any
-    * read in flight - the safety rests on that static invariant, not
-    * on timing. */
-   if (thumbnail->anim_windowed && thumbnail->anim_dt && thumbnail->anim)
-   {
-      size_t tell = image_transfer_anim_stream_consumed(thumbnail->anim,
-            type);
-      if (tell > 0)
-      {
-         size_t floor_off = image_transfer_anim_stream_media_floor(
-               thumbnail->anim, type);
-         size_t margin    = GFX_THUMB_ANIM_WINDOW_BACK;
-         /* Never decommit below the media floor: the demuxer revisits
-          * the header/index there on every loop. */
-         if (tell > floor_off && tell - floor_off < margin)
-            margin = tell - floor_off;
-         if (!data_transfer_window_feed(thumbnail->anim_dt, tell,
-                  GFX_THUMB_ANIM_WINDOW_AHEAD, margin))
-         {
-            /* An I/O failure while extending: the decoder would hit
-             * the end-of-data wall and loop early.  Keep the still. */
-            gfx_thumbnail_anim_close(thumbnail);
-            return;
-         }
-      }
-   }
+   /* Windowed playback: the shared session feeds the preview audio's
+    * window from here (its own transfer, consumed by the mixer under
+    * the mixer's lock).  The VIDEO window is fed by whichever thread
+    * decodes - the worker in gfx_thumbnail_anim_job_step, or this one
+    * in the synchronous path below - because the feed and the decoder
+    * share the demuxer's cursor and bound. */
+   if (thumbnail->anim_sess)
+      gfx_anim_preview_audio_feed((gfx_anim_preview_t*)thumbnail->anim_sess);
 
    if (thumbnail->anim_read_pending)
    {
@@ -1272,9 +1233,8 @@ void gfx_thumbnail_animate(gfx_thumbnail_t *thumbnail)
        * truncated, so pacing matches a fully-read open exactly. */
       image_transfer_anim_stream_complete_scan(thumbnail->anim, type,
             thumbnail->anim_buf, thumbnail->anim_buf_len);
-#if defined(GFX_THUMB_PREVIEW_AUDIO)
-      gfx_thumbnail_anim_audio_begin(thumbnail);
-#endif
+      if (thumbnail->anim_sess)
+         gfx_anim_preview_audio_begin((gfx_anim_preview_t*)thumbnail->anim_sess);
    }
 
 #if defined(GFX_THUMB_PREVIEW_AUDIO)
@@ -1320,27 +1280,26 @@ void gfx_thumbnail_animate(gfx_thumbnail_t *thumbnail)
 
          image_transfer_anim_stream_get_info(thumbnail->anim, type,
                &anim_w, &anim_h, &num_frames, &loop_count);
-         j0 = (gfx_thumb_anim_job_t*)calloc(1, sizeof(*j0));
-         j1 = (gfx_thumb_anim_job_t*)calloc(1, sizeof(*j1));
-         if (j0)
-            j0->frame = (uint32_t*)malloc(
-                  (size_t)anim_w * anim_h * sizeof(uint32_t));
-         if (j1)
-            j1->frame = (uint32_t*)malloc(
-                  (size_t)anim_w * anim_h * sizeof(uint32_t));
-         if (!j0 || !j1 || !j0->frame || !j1->frame)
          {
+            size_t frame_len = (((size_t)anim_w * anim_h * sizeof(uint32_t))
+                  + 63) & ~(size_t)63;
+            uint8_t *block   = (uint8_t*)calloc(1,
+                  2 * GFX_THUMB_ANIM_JOB_STRIDE + 2 * frame_len);
             /* Retry on a later vsync; the pair is all or nothing. */
-            if (j0)
-               free(j0->frame);
-            if (j1)
-               free(j1->frame);
-            free(j0);
-            free(j1);
-            return;
+            if (!block || sizeof(*j0) > GFX_THUMB_ANIM_JOB_STRIDE)
+            {
+               free(block);
+               return;
+            }
+            j0        = (gfx_thumb_anim_job_t*)block;
+            j1        = (gfx_thumb_anim_job_t*)(block + GFX_THUMB_ANIM_JOB_STRIDE);
+            j0->frame = (uint32_t*)(block + 2 * GFX_THUMB_ANIM_JOB_STRIDE);
+            j1->frame = (uint32_t*)(block + 2 * GFX_THUMB_ANIM_JOB_STRIDE + frame_len);
          }
          j0->stream     = thumbnail->anim;
          j1->stream     = thumbnail->anim;
+         j0->sess       = thumbnail->anim_sess;
+         j1->sess       = thumbnail->anim_sess;
          j0->type       = thumbnail->anim_type;
          j1->type       = thumbnail->anim_type;
          j0->width      = anim_w;
@@ -1442,12 +1401,23 @@ void gfx_thumbnail_animate(gfx_thumbnail_t *thumbnail)
    decode_start = now;
 
    /* Sample the upload format once and ask the stream to emit it
-    * directly (video streams bake the order in their blit); WEBP is
-    * not honoured and takes the swizzle fallback below. */
+    * directly (every stream type honours it; the swizzle below is the
+    * fallback for one that cannot). */
    sync_use_rgba     = (video_driver_get_disp_flags()
          & VIDEO_FLAG_USE_RGBA) ? true : false;
    sync_native_order = image_transfer_anim_stream_set_argb(
          thumbnail->anim, type, sync_use_rgba ? 0 : 1);
+
+   /* Keep the window straddling the decoder (see the worker's step
+    * for why this sits next to the decode).  An I/O failure while
+    * extending means the decoder would hit the wall and loop early:
+    * keep the still. */
+   if (thumbnail->anim_sess && !gfx_anim_preview_feed(
+            (gfx_anim_preview_t*)thumbnail->anim_sess))
+   {
+      gfx_thumbnail_anim_close(thumbnail);
+      return;
+   }
 
    if (!(frame = image_transfer_anim_stream_next(thumbnail->anim, type,
          &duration_ms)))
@@ -1472,10 +1442,9 @@ void gfx_thumbnail_animate(gfx_thumbnail_t *thumbnail)
       }
    }
 
-   /* Upload the frame.  The stream already emitted the upload order
-    * when the request above was honoured; otherwise (WEBP) it emits
-    * memory-order R,G,B,A and an ARGB pipeline needs the swap into
-    * the shared scratch buffer. */
+   /* Upload the frame.  Every stream type honours the order request
+    * above, so the swap below is a fallback that no current stream
+    * reaches; it stays for one that cannot honour the request. */
    {
       static uint32_t *swap_scratch = NULL;
       static size_t swap_scratch_px = 0;
@@ -1548,6 +1517,40 @@ static void gfx_thumbnail_handle_upload(
    if (thumbnail_tag->thumbnail->texture)
       gfx_thumbnail_reset(thumbnail_tag->thumbnail);
 
+   /* Check we have a valid image */
+   if (!img || (img->width < 1) || (img->height < 1))
+   {
+      GFX_THUMB_STATUS_STORE(&thumbnail_tag->thumbnail->status,
+            GFX_THUMBNAIL_STATUS_MISSING);
+      fade_enabled = true;
+      goto end;
+   }
+
+#ifdef HAVE_THREADS
+   /* Threaded video: hand the image over and keep the status PENDING
+    * until the handle comes back through gfx_thumbnail_upload_done(),
+    * which sets AVAILABLE (or MISSING) and starts the fade. The
+    * animation below is still opened now, from this task; if its first
+    * frame lands before the still, the still yields to it. */
+   if (video_driver_thread_wrapper_active())
+   {
+      gfx_thumbnail_upload_ticket_t *t = gfx_thumbnail_upload_ticket(
+            thumbnail_tag->thumbnail, img->width, img->height, false);
+      if (t && video_driver_texture_load_async(img,
+               gfx_display_texture_filter(),
+               gfx_thumbnail_upload_done, t, gfx_thumbnail_upload_release))
+      {
+         /* Dimensions now, so layout does not wait for the handle. */
+         thumbnail_tag->thumbnail->width  = img->width;
+         thumbnail_tag->thumbnail->height = img->height;
+         img = NULL; /* the wrapper's now */
+         goto open_anim;
+      }
+      free(t);
+      /* Refused: synchronous below. */
+   }
+#endif
+
    /* Set thumbnail 'missing' status by default
     * (saves a number of checks later)
     * > Release-store ensures prior texture reset is
@@ -1559,10 +1562,6 @@ static void gfx_thumbnail_handle_upload(
     * animations should be applied (based on current
     * thumbnail status and global configuration) */
    fade_enabled = true;
-
-   /* Check we have a valid image */
-   if (!img || (img->width < 1) || (img->height < 1))
-      goto end;
 
    /* Upload texture to GPU */
    if (!video_driver_texture_load(
@@ -1580,6 +1579,10 @@ static void gfx_thumbnail_handle_upload(
     *   AVAILABLE via acquire-load in gfx_thumbnail_draw() */
    GFX_THUMB_STATUS_STORE(&thumbnail_tag->thumbnail->status,
          GFX_THUMBNAIL_STATUS_AVAILABLE);
+
+#ifdef HAVE_THREADS
+open_anim:
+#endif
 
    /* If the file is an animation, open a streaming decoder for it;
     * frames are advanced by gfx_thumbnail_animate() while the
@@ -1604,7 +1607,8 @@ static void gfx_thumbnail_handle_upload(
       if (task_image_detach_video_stream(task, &vstream, &vtype,
             &vxfer, &vbuf, &vlen))
          gfx_thumbnail_anim_install(thumbnail_tag->thumbnail,
-               vstream, vtype, vbuf, vlen, vxfer, 0);
+               vstream, vtype, vbuf, vlen, vxfer, 0,
+               thumbnail_tag->path);
       else
          /* Everything without a stream to hand over opens by path.
           * For the video types adoption is the fast route because the
@@ -1620,9 +1624,18 @@ static void gfx_thumbnail_handle_upload(
           * a benefit that is one file open and a chunk walk.  The
           * open-by-path route is windowed, so an animated PNG already
           * streams over a sliding window rather than a whole-file
-          * read; adoption would not change its footprint. */
-         gfx_thumbnail_anim_open(thumbnail_tag->thumbnail,
-               thumbnail_tag->path);
+          * read; adoption would not change its footprint.
+          *
+          * The chunk walk itself, though, IS worth inheriting: the
+          * task read the whole file, so ask it whether the PNG was
+          * animated instead of re-opening the file here (on the main
+          * thread) to read a 4 KiB prefix that answers the same
+          * question.  Inconclusive (< 0: not a PNG task, adopted
+          * transfer, decode path without the buffer) falls back to
+          * the probe inside the open, exactly as before. */
+         gfx_thumbnail_anim_open_probed(thumbnail_tag->thumbnail,
+               thumbnail_tag->path,
+               task_image_png_probe(task));
    }
 
 end:
@@ -1842,10 +1855,16 @@ void gfx_thumbnail_request(
             /* Load thumbnail, if required */
             if (path_is_valid(thumbnail_path))
             {
-               gfx_thumbnail_tag_t *thumbnail_tag =
-                  (gfx_thumbnail_tag_t*)malloc(sizeof(gfx_thumbnail_tag_t));
+               gfx_thumbnail_tag_t *thumbnail_tag;
 
-               if (!thumbnail_tag)
+               /* A WebM or MP4 that serves as its own thumbnail takes
+                * the sliding window rather than the whole-file still
+                * decode; see gfx_thumbnail_try_video_open. */
+               if (gfx_thumbnail_try_video_open(thumbnail, thumbnail_path))
+                  goto end;
+
+               if (!(thumbnail_tag = (gfx_thumbnail_tag_t*)
+                        malloc(sizeof(gfx_thumbnail_tag_t))))
                   goto end;
 
                /* Configure user data */
@@ -1862,7 +1881,13 @@ void gfx_thumbnail_request(
                         gfx_thumbnail_downscale_cap(),
                         gfx_thumbnail_handle_upload, thumbnail_tag))
                {
-                  thumbnail->list_id = thumbnail_tag->list_id;
+                  /* Not thumbnail_tag->list_id: the tag belongs to the
+                   * task from the push on, and its callback frees it
+                   * when the load completes - on another thread, so a
+                   * fast load races this line (heap-use-after-free
+                   * under the harness's synchronous stub, where the
+                   * callback has already run). */
+                  thumbnail->list_id = p_gfx_thumb->list_id;
                   GFX_THUMB_STATUS_STORE(&thumbnail->status, GFX_THUMBNAIL_STATUS_PENDING);
                }
             }
@@ -1955,31 +1980,10 @@ void gfx_thumbnail_request_file(
        || !path_is_valid(file_path))
       return;
 
-   /* Video containers open over a sliding window before anything
-    * else: the still task reads the whole file into memory, which a
-    * multi-gigabyte recording fails outright (the allocation) or
-    * turns into a minute of disk reads for one frame - while the
-    * windowed animation path holds a fixed few-MiB footprint at any
-    * length, and its first decoded frame doubles as the still.  Only
-    * when the windowed open declines (admission, no reservation
-    * support, malformed container) does the file fall through to the
-    * historical whole-file still decode, which keeps small files on
-    * exotic platforms working exactly as before. */
-   {
-      enum image_type_enum ptype = image_texture_get_type(file_path);
-      if (   (ptype == IMAGE_TYPE_WEBM)
-          || (ptype == IMAGE_TYPE_MP4))
-      {
-         gfx_thumbnail_anim_open(thumbnail, file_path);
-         if (thumbnail->anim)
-         {
-            thumbnail->list_id = p_gfx_thumb->list_id;
-            GFX_THUMB_STATUS_STORE(&thumbnail->status,
-                  GFX_THUMBNAIL_STATUS_PENDING);
-            return;
-         }
-      }
-   }
+   /* Video containers take the sliding window before the still task
+    * is ever queued; see gfx_thumbnail_try_video_open. */
+   if (gfx_thumbnail_try_video_open(thumbnail, file_path))
+      return;
 
    /* Load thumbnail */
    if (!(thumbnail_tag = (gfx_thumbnail_tag_t*)malloc(sizeof(gfx_thumbnail_tag_t))))
@@ -2015,7 +2019,9 @@ void gfx_thumbnail_request_file(
          gfx_thumbnail_downscale_cap(),
          gfx_thumbnail_handle_upload, thumbnail_tag))
    {
-      thumbnail->list_id = thumbnail_tag->list_id;
+      /* Same as gfx_thumbnail_request: the tag is the task's from the
+       * push on and may already be freed by its callback. */
+      thumbnail->list_id = p_gfx_thumb->list_id;
       GFX_THUMB_STATUS_STORE(&thumbnail->status, GFX_THUMBNAIL_STATUS_PENDING);
    }
 }
@@ -2062,7 +2068,10 @@ void gfx_thumbnail_reset(gfx_thumbnail_t *thumbnail)
       gfx_animation_kill_by_tag(&tag);
    }
 
-   /* Reset all parameters */
+   /* Reset all parameters. Uploads still on their way to the video
+    * thread learn on delivery that this reset happened. */
+   thumbnail->upload_seq++;
+   thumbnail->anim_inflight = 0;
    GFX_THUMB_STATUS_STORE(&thumbnail->status, GFX_THUMBNAIL_STATUS_UNKNOWN);
    thumbnail->texture     = 0;
    thumbnail->width       = 0;
@@ -2633,7 +2642,7 @@ void gfx_thumbnail_draw(
       if (dispctx->blend_begin)
          dispctx->blend_begin(userdata);
 
-      if (!p_disp->dispctx->handles_transform)
+      if (!dispctx->handles_transform)
       {
          /* Perform 'rotation' step
           * > Note that rotation does not actually work...
@@ -2864,7 +2873,7 @@ void gfx_thumbnail_fill_content_img(char *s,
    while ((scrub_char_ptr = strpbrk(s, "&*/:`\"<>?\\|")))
       *scrub_char_ptr = '_';
    /* Add PNG extension */
-   strlcpy(s + _len, ".png", len - _len);
+   strlcpy_lit(s + _len, ".png", len - _len);
 }
 
 /* Resets thumbnail path data
@@ -2996,7 +3005,7 @@ bool gfx_thumbnail_set_system(gfx_thumbnail_path_data_t *path_data,
    /* Hack: There is only one MAME thumbnail repo,
     * so filter any input starting with 'MAME...' */
    if (strncmp(system, "MAME", 4) == 0)
-      path_data->system_len = strlcpy(path_data->system, "MAME", sizeof(path_data->system));
+      path_data->system_len = strlcpy_lit(path_data->system, "MAME", sizeof(path_data->system));
    else
       path_data->system_len = strlcpy(path_data->system, system, sizeof(path_data->system));
 
@@ -3156,14 +3165,14 @@ bool gfx_thumbnail_set_content_image(
       img_dir, img_name, sizeof(path_data->content_path));
 
    /* Set core name to "imageviewer" */
-   strlcpy(path_data->content_core_name,
+   strlcpy_lit(path_data->content_core_name,
          "imageviewer",
          sizeof(path_data->content_core_name));
 
    /* Set database name (arbitrarily) to "_images_"
     * (required for compatibility with gfx_thumbnail_update_path(),
     * but not actually used...) */
-   strlcpy(path_data->content_db_name,
+   strlcpy_lit(path_data->content_db_name,
          "_images_", sizeof(path_data->content_db_name));
 
    /* Redundant error check */
@@ -3428,15 +3437,31 @@ bool gfx_thumbnail_update_path(
       if (path_is_media_type(path_data->content_path) == RARCH_CONTENT_IMAGE)
          strlcpy(thumbnail_path,
                path_data->content_path, PATH_MAX_LENGTH * sizeof(char));
-      /* A WebM or MP4 file is likewise its own (animated) thumbnail,
-       * but unlike an image the entire file must be read to decode it,
-       * so refuse anything past the animation decoder's file-size cap */
+      /* A WebM or MP4 file is likewise its own (animated) thumbnail.
+       *
+       * Where the platform can reserve address space the load opens
+       * over a sliding window and commits only its head plus that
+       * window, so the file's length costs nothing and only the
+       * window has to be admitted - a multi-hour 4K recording
+       * previews from the same budget as a ten-second clip.  The
+       * whole-file cap applied here unconditionally, which refused
+       * every video past GFX_THUMB_ANIM_ABS_MAX_FILE outright: the
+       * path resolved empty, the thumbnail went MISSING, and no
+       * decode was ever attempted.  That cap predates the windowed
+       * open and had simply never been revisited.
+       *
+       * Without reservation support the open degrades to a whole-file
+       * read, so the length-based test is still the right one there.
+       * This mirrors the admission in gfx_thumbnail_anim_open. */
       else if (   (   (image_texture_get_type(path_data->content_path)
                         == IMAGE_TYPE_WEBM)
                    || (image_texture_get_type(path_data->content_path)
                         == IMAGE_TYPE_MP4))
-               && gfx_thumb_anim_mem_ok(
-                     (uint64_t)path_get_size(path_data->content_path), 0))
+               && (data_transfer_reserve_supported()
+                     ? gfx_anim_preview_window_admit(0)
+                     : gfx_anim_preview_admit(
+                        (uint64_t)path_get_size(
+                           path_data->content_path), 0)))
          strlcpy(thumbnail_path,
                path_data->content_path, PATH_MAX_LENGTH * sizeof(char));
    }
@@ -3628,7 +3653,7 @@ void gfx_savestate_thumbnail_get_path(
          path_remove_extension(new_path);
 
          _len = strlcpy(entry_basename, path_basename(new_path), PATH_MAX_LENGTH);
-         _len = strlcpy(entry_basename + _len, ".state", PATH_MAX_LENGTH - _len);
+         _len = strlcpy_lit(entry_basename + _len, ".state", PATH_MAX_LENGTH - _len);
 
          /* Set temporary save redirection paths */
          runloop_path_set_redirect(config_get_ptr(), old_savefile_dir, old_savestate_dir);

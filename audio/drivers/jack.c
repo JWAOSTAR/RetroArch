@@ -18,7 +18,10 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <retro_atomic.h>
+
 #include <jack/jack.h>
+#include <lists/string_list.h>
 #include <jack/types.h>
 #include <jack/ringbuffer.h>
 
@@ -29,12 +32,15 @@
 #include "../audio_driver.h"
 #include "../../verbosity.h"
 
-#define FRAMES(x) (x / (sizeof(float) * 2))
+#define JACK_MAX_PORTS 8
+#define FRAMES(x) (x / (sizeof(float) * jd->channels))
 
 typedef struct jack
 {
    jack_client_t *client;
-   jack_port_t *ports[2];
+   jack_port_t *ports[JACK_MAX_PORTS];
+   unsigned channels;   /* ports, and samples a frame in the ring */
+   uint32_t layout;     /* the frontend's mask, one port a position */
    jack_ringbuffer_t *buffer;
 #ifdef HAVE_THREADS
    scond_t *cond;
@@ -46,15 +52,22 @@ typedef struct jack
     * See the note there. */
    int64_t wait_us;
 #endif
+   /* Frames the server has asked for since the client started, for the
+    * sink rate estimate. ja_process_cb() is called once per period with
+    * the period's length, so this counts the device's own clock -
+    * silence during an underrun included, because the period elapsed
+    * either way. Written only by the process callback, read by the
+    * frontend through ja_frames_consumed(). */
+   retro_atomic_size_t consumed;
    volatile bool shutdown;
    bool nonblock;
    bool is_paused;
 } jack_t;
 
-static size_t ja_read_deinterleaved(float *dst[2], jack_nframes_t dst_offset,
+static size_t ja_read_deinterleaved(jack_t *jd, float *dst[JACK_MAX_PORTS], jack_nframes_t dst_offset,
       jack_ringbuffer_data_t buf, jack_nframes_t nframes)
 {
-   int i;
+   unsigned i;
    jack_nframes_t j, frames_avail;
    const float *src = (const float *)buf.buf;
 
@@ -65,10 +78,23 @@ static size_t ja_read_deinterleaved(float *dst[2], jack_nframes_t dst_offset,
    nframes = nframes < frames_avail ? nframes : frames_avail;
 
    for (j = 0; j < nframes; j++)
-      for (i = 0; i < 2; i++)
+      for (i = 0; i < jd->channels; i++)
          dst[i][dst_offset + j] = *src++;
 
    return nframes;
+}
+
+/* Frames the server has taken since the client started. JACK calls the
+ * process callback once per period and says how long the period is, so
+ * counting what it asks for counts device time; there is no queue to
+ * subtract, unlike ALSA, because the callback is the device consuming
+ * the audio rather than a queue being filled. */
+static size_t ja_frames_consumed(void *data)
+{
+   jack_t *jd = (jack_t*)data;
+   if (!jd)
+      return 0;
+   return retro_atomic_load_acquire_size(&jd->consumed);
 }
 
 static int ja_process_cb(jack_nframes_t nframes, void *data)
@@ -77,22 +103,23 @@ static int ja_process_cb(jack_nframes_t nframes, void *data)
 
    if (nframes > 0)
    {
-      int i;
-      float *dst[2];
+      retro_atomic_fetch_add_size(&jd->consumed, (size_t)nframes);
+      unsigned i;
+      float *dst[JACK_MAX_PORTS];
       jack_ringbuffer_data_t buf[2];
       jack_nframes_t read = 0;
-      for (i = 0; i < 2; i++)
+      for (i = 0; i < jd->channels; i++)
          dst[i] = (float *)jack_port_get_buffer(jd->ports[i], nframes);
 
       jack_ringbuffer_get_read_vector(jd->buffer, buf);
 
       for (i = 0; i < 2; i++)
-         read += ja_read_deinterleaved(dst, read, buf[i], nframes - read);
+         read += ja_read_deinterleaved(jd, dst, read, buf[i], nframes - read);
 
-      jack_ringbuffer_read_advance(jd->buffer, read * sizeof(float) * 2);
+      jack_ringbuffer_read_advance(jd->buffer, read * sizeof(float) * jd->channels);
 
       for (; read < nframes; read++)
-         for (i = 0; i < 2; i++)
+         for (i = 0; i < jd->channels; i++)
             dst[i][read] = 0.0f;
    }
 #ifdef HAVE_THREADS
@@ -114,7 +141,12 @@ static void ja_shutdown_cb(void *data)
 #endif
 }
 
-static int ja_parse_ports(char **dest_ports, const char **jports)
+/* The two ports the setting may name, then the server's physical
+ * inputs in order for the rest - which, past stereo, is where the
+ * user's patchbay takes over. Returns the count filled; a server with
+ * fewer physical inputs than the layout has positions leaves the
+ * rest unconnected. */
+static int ja_parse_ports(jack_t *jd, char **dest_ports, const char **jports)
 {
    int i;
    int parsed               = 0;
@@ -131,10 +163,16 @@ static int ja_parse_ports(char **dest_ports, const char **jports)
    else if (*audio_device)
       dest_ports[parsed++] = strdup(audio_device);
 
-   for (i = parsed; i < 2; i++)
+   for (i = parsed; i < (int)jd->channels; i++)
+   {
+      int k;
+      for (k = 0; k <= i && jports[k]; k++) ;
+      if (k <= i)
+         break;                 /* the server has no more physical inputs */
       dest_ports[i] = strdup(jports[i]);
+   }
 
-   return 2;
+   return i;
 }
 
 static size_t ja_find_buffersize(jack_t *jd, int latency, unsigned out_rate)
@@ -144,7 +182,7 @@ static size_t ja_find_buffersize(jack_t *jd, int latency, unsigned out_rate)
    int jack_latency     = 0;
    int           frames = latency * out_rate / 1000;
 
-   for (i = 0; i < 2; i++)
+   for (i = 0; i < (int)jd->channels; i++)
    {
       jack_port_get_latency_range(jd->ports[i], JackPlaybackLatency, &range);
       if ((int)range.max > jack_latency)
@@ -152,6 +190,10 @@ static size_t ja_find_buffersize(jack_t *jd, int latency, unsigned out_rate)
    }
 
    RARCH_LOG("[JACK] Jack latency is %d frames.\n", jack_latency);
+   /* The graph's own stage behind the ring, for the statistics
+    * overlay: what the port reports for playback, at the JACK rate the
+    * driver runs at. */
+   audio_driver_set_device_latency((size_t)jack_latency);
 
    buffer_frames     = frames - jack_latency;
    min_buffer_frames = jack_get_buffer_size(jd->client) * 2;
@@ -161,23 +203,36 @@ static size_t ja_find_buffersize(jack_t *jd, int latency, unsigned out_rate)
    if (buffer_frames < min_buffer_frames)
       buffer_frames = min_buffer_frames;
 
-   return buffer_frames * sizeof(jack_default_audio_sample_t);
+   /* The ring holds interleaved float, a sample a channel a frame.
+    * Sized at one sample a frame it held half the frames asked for, and
+    * buffer_size() reported that half, so the rate control's setpoint -
+    * half of it again - sat at a quarter of the latency setting. */
+   return buffer_frames * jd->channels * sizeof(jack_default_audio_sample_t);
 }
 
 static void *ja_init(const char *device,
       unsigned rate, unsigned latency,
-      unsigned block_frames,
       unsigned *new_rate)
 {
    int i;
-   char *dest_ports[2];
+   char *dest_ports[JACK_MAX_PORTS];
    const char **jports = NULL;
+   /* one output port a position of the frontend's layout, named for
+    * the position, in the mask's ascending order */
+   static const char *port_names[16] = {
+      "front-left", "front-right", "front-center", "lfe",
+      "rear-left", "rear-right", "front-left-of-center", "front-right-of-center",
+      "rear-center", "side-left", "side-right", NULL, NULL, NULL, NULL, NULL };
+   uint32_t layout   = audio_driver_requested_layout();
+   unsigned channels = audio_layout_channels(layout);
    size_t       bufsize = 0;
    int           parsed = 0;
    jack_t           *jd = (jack_t*)calloc(1, sizeof(jack_t));
 
    if (!jd)
       return NULL;
+
+   retro_atomic_size_init(&jd->consumed, 0);
 
 #ifdef HAVE_THREADS
    jd->cond      = scond_new();
@@ -193,13 +248,34 @@ static void *ja_init(const char *device,
    jack_set_process_callback(jd->client, ja_process_cb, jd);
    jack_on_shutdown(jd->client, ja_shutdown_cb, jd);
 
-   jd->ports[0] = jack_port_register(jd->client, "left", JACK_DEFAULT_AUDIO_TYPE, JackPortIsOutput, 0);
-   jd->ports[1] = jack_port_register(jd->client, "right", JACK_DEFAULT_AUDIO_TYPE, JackPortIsOutput, 0);
-   if (!jd->ports[0] || !jd->ports[1])
+   if (channels < 2 || channels > JACK_MAX_PORTS)
    {
-      RARCH_ERR("[JACK] Failed to register ports.\n");
-      goto error;
+      layout   = AUDIO_LAYOUT_STEREO;
+      channels = 2;
    }
+   jd->layout   = layout;
+   jd->channels = channels;
+   if (channels == 2)
+   {
+      jd->ports[0] = jack_port_register(jd->client, "left", JACK_DEFAULT_AUDIO_TYPE, JackPortIsOutput, 0);
+      jd->ports[1] = jack_port_register(jd->client, "right", JACK_DEFAULT_AUDIO_TYPE, JackPortIsOutput, 0);
+   }
+   else
+   {
+      unsigned bit, n = 0;
+      for (bit = 0; bit < 16 && n < channels; bit++)
+         if (layout & (1u << bit))
+            jd->ports[n++] = jack_port_register(jd->client, port_names[bit] ? port_names[bit] : "out",
+                  JACK_DEFAULT_AUDIO_TYPE, JackPortIsOutput, 0);
+   }
+   for (i = 0; i < (int)channels; i++)
+      if (!jd->ports[i])
+      {
+         RARCH_ERR("[JACK] Failed to register ports.\n");
+         goto error;
+      }
+   if (channels > 2)
+      RARCH_LOG("[JACK] %u output ports for layout 0x%03x, named for their positions.\n", channels, layout);
 
    jports = jack_get_ports(jd->client, NULL, NULL, JackPortIsPhysical | JackPortIsInput);
    if (!jports)
@@ -221,7 +297,7 @@ static void *ja_init(const char *device,
       jd->wait_us  = 1000;
 #endif
 
-   RARCH_LOG("[JACK] Internal buffer size: %d frames.\n", (int)(bufsize / sizeof(jack_default_audio_sample_t)));
+   RARCH_LOG("[JACK] Internal buffer size: %d frames.\n", (int)(bufsize / (jd->channels * sizeof(jack_default_audio_sample_t))));
 
    jd->buffer = jack_ringbuffer_create(bufsize);
    if (!jd->buffer)
@@ -230,7 +306,7 @@ static void *ja_init(const char *device,
       goto error;
    }
 
-   parsed = ja_parse_ports(dest_ports, jports);
+   parsed = ja_parse_ports(jd, dest_ports, jports);
 
    if (jack_activate(jd->client) < 0)
    {
@@ -238,14 +314,24 @@ static void *ja_init(const char *device,
       goto error;
    }
 
-   for (i = 0; i < 2; i++)
+   /* The first two must connect, as always; a position past stereo
+    * with nowhere to go is left for the patchbay, and said so. */
+   for (i = 0; i < parsed; i++)
    {
       if (jack_connect(jd->client, jack_port_name(jd->ports[i]), dest_ports[i]))
       {
-         RARCH_ERR("[JACK] Failed to connect to Jack port.\n");
-         goto error;
+         if (i < 2)
+         {
+            RARCH_ERR("[JACK] Failed to connect to Jack port.\n");
+            goto error;
+         }
+         RARCH_WARN("[JACK] Port %s did not connect to %s; connect it in the patchbay.\n",
+               jack_port_name(jd->ports[i]), dest_ports[i]);
       }
    }
+   if (parsed < (int)jd->channels)
+      RARCH_WARN("[JACK] %u of %u ports left unconnected: the server has %d physical inputs. Connect them in the patchbay.\n",
+            jd->channels - (unsigned)parsed, jd->channels, parsed);
 
    for (i = 0; i < parsed; i++)
       free(dest_ports[i]);
@@ -258,15 +344,34 @@ error:
       free(dest_ports[i]);
    if (jports)
       jack_free(jports);
+   /* The client, ring, condition and lock are made before the server
+    * is asked for anything; a server that is not there leaves all four
+    * to release. */
+   if (jd->client)
+      jack_client_close(jd->client);
+   if (jd->buffer)
+      jack_ringbuffer_free(jd->buffer);
+   if (jd->cond)
+      scond_free(jd->cond);
+   if (jd->cond_lock)
+      slock_free(jd->cond_lock);
    free(jd);
    return NULL;
 }
+
+/* How many period-long waits a blocked write or wait_writable() may
+ * take before it gives up on the server making room. The process
+ * callback frees a period every period on a running graph; a graph
+ * that has stopped running it - the client deactivated, the server
+ * frozen - never does, and shutdown_cb is not called for that. */
+#define JACK_WAIT_LAPS 8
 
 static ssize_t ja_write(void *data, const void *buf_, size_t len)
 {
    size_t _len = 0;
    jack_t      *jd = (jack_t*)data;
    const char *buf = (const char *)buf_;
+   int laps        = JACK_WAIT_LAPS;
 
    while (len > 0)
    {
@@ -285,7 +390,7 @@ static ssize_t ja_write(void *data, const void *buf_, size_t len)
        * every sample was L/R-swapped (with a one-sample interchannel
        * skew) for the rest of the session.  The process callback reads
        * in whole frames, so the writer must feed whole frames. */
-      to_write = (to_write / (2 * sizeof(float))) * (2 * sizeof(float));
+      to_write = (to_write / (jd->channels * sizeof(float))) * (jd->channels * sizeof(float));
 
       if (to_write > 0)
       {
@@ -316,6 +421,12 @@ static ssize_t ja_write(void *data, const void *buf_, size_t len)
          slock_lock(jd->cond_lock);
          scond_wait_timeout(jd->cond, jd->cond_lock, jd->wait_us);
          slock_unlock(jd->cond_lock);
+         /* Bounded overall as well as per wait: a graph that never
+          * makes room ends the write with what went. */
+         if (--laps < 0)
+            break;
+#else
+         break;
 #endif
          continue;
       }
@@ -396,6 +507,92 @@ static size_t ja_buffer_size(void *data)
    return jd->buffer_size;
 }
 
+/* Sleep on the condition the process callback signals after every
+ * cycle until at least len bytes fit in the ring, capped at half of it
+ * so the wait always ends. Returns the free space then, or 0 once the
+ * server has shut the client down. */
+static size_t ja_wait_writable(void *data, size_t len)
+{
+   jack_t *jd = (jack_t*)data;
+   size_t avail;
+
+   int laps = JACK_WAIT_LAPS;
+
+   if (len > jd->buffer_size / 2)
+      len = jd->buffer_size / 2;
+
+   for (;;)
+   {
+      if (jd->shutdown)
+         return 0;
+      avail = jack_ringbuffer_write_space(jd->buffer);
+      if (avail >= len)
+         return avail;
+#ifdef HAVE_THREADS
+      slock_lock(jd->cond_lock);
+      scond_wait_timeout(jd->cond, jd->cond_lock, jd->wait_us);
+      slock_unlock(jd->cond_lock);
+      /* No room after this many periods: the graph is not running the
+       * process callback, and the pass is handed back as no space
+       * coming from this call rather than waited on further. */
+      if (--laps < 0)
+         return 0;
+#else
+      return 0;
+#endif
+   }
+}
+
+/* The device string is "left_port,right_port": physical input ports the
+ * stream connects to. List every physical input port from a throwaway
+ * client, without starting a server that is not already running. */
+static void *ja_device_list_new(void *data)
+{
+   int i;
+   jack_status_t status;
+   union string_list_elem_attr attr;
+   jack_client_t *client   = NULL;
+   const char   **ports    = NULL;
+   struct string_list *sl  = string_list_new();
+
+   (void)data;
+   attr.i = 0;
+   if (!sl)
+      return NULL;
+
+   client = jack_client_open("RetroArch-enum", JackNoStartServer, &status);
+   if (!client)
+   {
+      string_list_free(sl);
+      return NULL;
+   }
+
+   ports = jack_get_ports(client, NULL, NULL, JackPortIsPhysical | JackPortIsInput);
+   if (ports)
+   {
+      for (i = 0; ports[i]; i++)
+         string_list_append(sl, ports[i], attr);
+      jack_free(ports);
+   }
+
+   jack_client_close(client);
+   return sl;
+}
+
+static void ja_device_list_free(void *data, void *array_list_data)
+{
+   struct string_list *sl = (struct string_list*)array_list_data;
+   (void)data;
+   if (sl)
+      string_list_free(sl);
+}
+
+static uint32_t ja_layout(void *data)
+{
+   jack_t *jd = (jack_t*)data;
+   return jd ? jd->layout : AUDIO_LAYOUT_STEREO;
+}
+
 audio_driver_t audio_jack = {
    ja_init,
    ja_write,
@@ -406,9 +603,13 @@ audio_driver_t audio_jack = {
    ja_free,
    ja_use_float,
    "jack",
-   NULL,
-   NULL,
+   ja_device_list_new,
+   ja_device_list_free,
    ja_write_avail,
    ja_buffer_size,
-   NULL /* write_raw */
+   NULL, /* write_raw */
+   ja_wait_writable,
+   ja_frames_consumed,
+   NULL, /* underruns */
+   ja_layout
 };

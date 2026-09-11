@@ -21,6 +21,7 @@
 
 #include <stdlib.h>
 #include <stdio.h>
+#include <stdint.h>  /* uintptr_t, for the query generation token */
 #include <sys/types.h>
 #include <file/archive_file.h>
 #include <streams/interface_stream.h>
@@ -150,6 +151,7 @@
 /* Activate this to enable assertions on code sections
  * that should be exclusive to one modus */
 #include <assert.h>
+#include <compat/strl.h>
 #define NETPLAY_ASSERT_MODUS(m) assert(networking_driver_st.data->modus==(m));
 #else
 #define NETPLAY_ASSERT_MODUS(m)
@@ -283,8 +285,12 @@ uint32_t netplay_content_crc(void)
       }
       else
       {
+         /* The whole content file, hashed once at session start:
+          * FREQUENT_ACCESS so the VFS maps it where it can and the
+          * CRC is folded from the mapping rather than read out. */
          intfstream_t *fd = intfstream_open_file(path,
-               RETRO_VFS_FILE_ACCESS_READ, RETRO_VFS_FILE_ACCESS_HINT_NONE);
+               RETRO_VFS_FILE_ACCESS_READ,
+               RETRO_VFS_FILE_ACCESS_HINT_FREQUENT_ACCESS);
          if (fd)
          {
             if (!intfstream_get_crc(fd, &crc))
@@ -777,7 +783,7 @@ static bool netplay_lan_ad_server(netplay_t *netplay)
          }
       }
       else
-         strlcpy(ad_packet_buffer.frontend, "N/A",
+         strlcpy_lit(ad_packet_buffer.frontend, "N/A",
             sizeof(ad_packet_buffer.frontend));
 
       strlcpy(ad_packet_buffer.core, sysinfo->library_name,
@@ -826,7 +832,7 @@ static bool netplay_lan_ad_server(netplay_t *netplay)
          strlcpy(ad_packet_buffer.content,
             (basename && *basename) ? basename : "N/A",
             sizeof(ad_packet_buffer.content));
-         strlcpy(ad_packet_buffer.subsystem_name, "N/A",
+         strlcpy_lit(ad_packet_buffer.subsystem_name, "N/A",
             sizeof(ad_packet_buffer.subsystem_name));
 
          ad_packet_buffer.content_crc = (int32_t)htonl(netplay_content_crc());
@@ -1407,9 +1413,9 @@ static bool netplay_handshake_info(netplay_t *netplay,
    }
    else
    {
-      strlcpy(info_buf.core_name,
+      strlcpy_lit(info_buf.core_name,
             "UNKNOWN", sizeof(info_buf.core_name));
-      strlcpy(info_buf.core_version,
+      strlcpy_lit(info_buf.core_version,
             "UNKNOWN", sizeof(info_buf.core_version));
    }
 
@@ -2304,29 +2310,63 @@ bool netplay_delta_frame_ready(netplay_t *netplay, struct delta_frame *delta,
    return true;
 }
 
-static const uint8_t* netplay_get_savestate_coremem(netplay_t* netplay, const uint8_t* input)
+/* Size field of a savestate container block header.  Read through
+ * uint32_t: a uint8_t promotes to int, so a plain 'b[7] << 24' with
+ * the top bit set overflows, and the negative result sign-extends
+ * when it lands in a size_t. */
+static uint32_t netplay_read_block_size(const uint8_t *hdr)
 {
-   /* If the container header is detected, find the coremem block */
-   if (memcmp(input, "NETPLAY", 7) == 0)
+   return   ((uint32_t)hdr[7] << 24)
+          | ((uint32_t)hdr[6] << 16)
+          | ((uint32_t)hdr[5] << 8)
+          |  (uint32_t)hdr[4];
+}
+
+/* Walks a "NETPLAY1" container from 'input' to 'stop' and returns the
+ * start of the MEM block content, or NULL if the container has no MEM
+ * block before its END block or a block runs past 'stop'.  Each
+ * block is checked to fit before it is stepped over, so a stale or
+ * uninitialized tail past the END block is never interpreted. */
+static const uint8_t* netplay_find_block(const uint8_t *input,
+      const uint8_t *stop, const char *want)
+{
+   input += 8; /* NETPLAY# */
+
+   while ((size_t)(stop - input) >= 8)
    {
-      const uint8_t* stop = input + netplay->state_size;
-      input += 8; /* NETPLAY# */
+      size_t block_size     = netplay_read_block_size(input);
+      size_t aligned_size   = CONTENT_ALIGN_SIZE(block_size);
+      const uint8_t *marker = input;
 
-      while (input < stop)
-      {
-         size_t block_size = (input[7] << 24 | input[6] << 16 | input[5] << 8 | input[4]);
-         const uint8_t* marker = input;
+      input += 8;
 
-         input += 8;
+      if (memcmp(marker, NETPLAYSTATE_END_BLOCK, 4) == 0)
+         return NULL;
+      /* The writer always pads a block to 8 bytes, so the padded size
+       * has to fit too; the first test catches size_t wrap on the
+       * padding. */
+      if (   aligned_size < block_size
+          || aligned_size > (size_t)(stop - input))
+         return NULL;
+      if (memcmp(marker, want, 4) == 0)
+         return input;
 
-         if (memcmp(marker, NETPLAYSTATE_MEM_BLOCK, 4) == 0)
-            break;
-
-         input += CONTENT_ALIGN_SIZE(block_size);
-      }
+      input += aligned_size;
    }
 
-   return input;
+   return NULL;
+}
+
+/* Returns the start of the core's own serialized memory inside a
+ * state buffer, or NULL for a malformed container.  Raw core data
+ * (no container header) is returned as-is. */
+static const uint8_t* netplay_get_savestate_coremem(netplay_t* netplay, const uint8_t* input)
+{
+   if (netplay->state_size < 8 || memcmp(input, "NETPLAY", 7) != 0)
+      return input;
+
+   return netplay_find_block(input, input + netplay->state_size,
+         NETPLAYSTATE_MEM_BLOCK);
 }
 
 /**
@@ -2342,6 +2382,12 @@ static uint32_t netplay_delta_frame_crc(netplay_t *netplay,
    NETPLAY_ASSERT_MODUS(NETPLAY_MODUS_INPUT_FRAME_SYNC);
    input = netplay_get_savestate_coremem(netplay,
       (const uint8_t*)delta->state);
+
+   /* A malformed container carries no core memory to hash; report a
+    * mismatch so the peer state gets re-requested rather than hashing
+    * whatever happens to follow the buffer. */
+   if (!input)
+      return 0;
 
    return encoding_crc32(0L, input, netplay->coremem_size);
 }
@@ -6299,7 +6345,8 @@ static bool netplay_get_cmd(netplay_t *netplay,
             if (state_size > netplay->state_size)
             {
                /* other client state size is larger than ours, grow ours */
-               netplay->state_size = state_size;
+               size_t old_state_size = netplay->state_size;
+               netplay->state_size   = state_size;
                for (i = 0; i < netplay->buffer_size; i++)
                {
                   /* realloc-to-tmp to avoid the classic realloc-
@@ -6315,6 +6362,11 @@ static bool netplay_get_cmd(netplay_t *netplay,
                   if (!tmp)
                      return false;
                   netplay->buffer[i].state = tmp;
+                  /* The container walk stops at the END block, but
+                   * keep the grown tail defined for anything that
+                   * still reads the full state_size. */
+                  memset((uint8_t*)tmp + old_state_size, 0,
+                        netplay->state_size - old_state_size);
                }
             }
 
@@ -7738,7 +7790,7 @@ static void netplay_send_savestate(netplay_t *netplay,
       const uint8_t* input = netplay_get_savestate_coremem(netplay,
             (const uint8_t*)serial_info->data_const);
 
-      if (input != serial_info->data_const)
+      if (input && input != serial_info->data_const)
       {
          serial_info->data_const = input;
          serial_info->size = netplay->coremem_size;
@@ -7764,6 +7816,19 @@ static void netplay_frontend_paused(netplay_t *netplay, bool paused)
     * We need this because even if RARCH_NETPLAY_CTL_ALLOW_PAUSE returns false
     * on some platforms the frontend may try to force netplay to pause. */
    if (netplay->modus == NETPLAY_MODUS_CORE_PACKET_INTERFACE)
+      return;
+
+   /* A server that disables pausing answers NETPLAY_CMD_PAUSE from a
+    * client with a NAK and hangs the connection up, so a client whose
+    * server disallows it must not announce a pause at all. The
+    * frontend reaches here for transient states as well as for a
+    * deliberate pause - pushing the Quick Menu parks the runloop for
+    * a single frame, which is how opening the menu or the chat prompt
+    * arrives - and announcing those cost the connection over
+    * something the user never asked for. Leaving local_paused unset
+    * keeps the pair symmetric: the resume that netplay_pre_frame
+    * sends off the back of it is suppressed with it. */
+   if (paused && !netplay->is_server && !netplay->allow_pausing)
       return;
 
    netplay->local_paused = paused;
@@ -7893,14 +7958,31 @@ static bool netplay_process_savestate1(retro_ctx_serialize_info_t* serial_info)
    const uint8_t* stop        = input + serial_info->size;
    bool seen_core             = false;
 
+   if (serial_info->size < 8)
+      return false;
+
    input += 8; /* NETPLAY1 */
 
-   while (input < stop)
+   /* The buffer is netplay->state_size bytes, sized for the largest
+    * container this side can build, but a client builds without the
+    * ACHV block and a peer's state can be a different size again, so
+    * the container usually ends before the buffer does.  Stop at the
+    * END block rather than the buffer end: what follows is a stale
+    * or uninitialized tail, not more blocks. */
+   while ((size_t)(stop - input) >= 8)
    {
-      size_t block_size     = (input[7] << 24 | input[6] << 16 |  input[5] << 8 | input[4]);
+      size_t block_size     = netplay_read_block_size(input);
+      size_t aligned_size   = CONTENT_ALIGN_SIZE(block_size);
       const uint8_t *marker = input;
 
       input += 8;
+
+      if (memcmp(marker, NETPLAYSTATE_END_BLOCK, 4) == 0)
+         break;
+
+      if (   aligned_size < block_size
+          || aligned_size > (size_t)(stop - input))
+         return false;
 
       if (memcmp(marker, NETPLAYSTATE_MEM_BLOCK, 4) == 0)
       {
@@ -7936,15 +8018,16 @@ static bool netplay_process_savestate1(retro_ctx_serialize_info_t* serial_info)
             }
          }
 
+         /* Flags word, then the rcheevos data.  Skip the flags on a
+          * copy: the block step below already covers the whole
+          * block, and stepping 'input' here as well used to land the
+          * walk 8 bytes past the next header. */
          if (block_size > 8)
-         {
-            input += 8;
-            rcheevos_set_serialized_data((void*)input);
-         }
+            rcheevos_set_serialized_data((void*)(input + 8));
       }
 #endif
 
-      input += CONTENT_ALIGN_SIZE(block_size);
+      input += aligned_size;
    }
 
    if (!seen_core)
@@ -8012,7 +8095,10 @@ static bool netplay_build_savestate(netplay_t* netplay, retro_ctx_serialize_info
       output += 8;
       memset(output, 0, 8);
       output[0] = rcheevos_hardcore_active() ? 1 : 0;
-      output += cheevos_size;
+      /* Step by the padded size, as the reader does and as
+       * state_size was budgeted; an unpadded step puts the END
+       * header where the reader does not look for it. */
+      output += CONTENT_ALIGN_SIZE(cheevos_size);
    }
 #endif
 
@@ -8716,6 +8802,15 @@ size_t audio_sample_batch_net(const int16_t *data, size_t frames)
    return frames;
 }
 
+/* The float batch entry's gate: the same skip as the int16 batch
+ * above, asked from inside the entry the core holds by pointer. */
+bool audio_float_gate_net(void)
+{
+   net_driver_state_t *net_st  = &networking_driver_st;
+   netplay_t          *netplay = net_st->data;
+   return netplay_should_skip(netplay) || netplay->stall;
+}
+
 static void netplay_announce_cb(retro_task_t *task, void *task_data,
       void *user_data, const char *err)
 {
@@ -9009,6 +9104,38 @@ static void netplay_announce(netplay_t *netplay)
    free(mitm_custom_addr);
 }
 
+/* Cleared by netplay_mitm_query_cb on every path it can take, so
+ * the wait below ends as soon as THIS query is answered.  The task
+ * queue runs the callback of every task it retires, successful or
+ * not, so there is no completion that leaves this set. */
+static bool netplay_mitm_query_pending = false;
+
+/* Incremented for every query issued, and again when one is
+ * abandoned.  The callback carries the value it was issued with and
+ * does nothing if it no longer matches.
+ *
+ * Without this a timed-out query is still in flight, and its
+ * callback - which writes host_room->mitm_address and mitm_port
+ * unconditionally - would land after the caller had already fallen
+ * back to direct mode, publishing a tunnel address for a session
+ * that is not tunnelled.  Bounding the wait without this guard would
+ * trade a hang for silent corruption. */
+static unsigned netplay_mitm_query_generation = 0;
+
+/* The handle the outstanding query was issued for.
+ *
+ * A query can now be started before host setup runs, so by the time
+ * netplay_mitm_query() is reached the answer may already be in hand
+ * or on its way.  This is what lets it tell "already asked for this"
+ * from "asked for something else", so a user who changes the relay
+ * setting between the two points still gets the server they picked. */
+static char netplay_mitm_query_handle[NAME_MAX_LENGTH] = {0};
+
+static bool netplay_mitm_query_is_pending(void *data)
+{
+   return netplay_mitm_query_pending;
+}
+
 static void netplay_mitm_query_cb(retro_task_t *task, void *task_data,
       void *user_data, const char *err)
 {
@@ -9017,6 +9144,11 @@ static void netplay_mitm_query_cb(retro_task_t *task, void *task_data,
    http_transfer_data_t *data     = (http_transfer_data_t*)task_data;
    net_driver_state_t  *net_st    = &networking_driver_st;
    struct netplay_room *host_room = &net_st->host_room;
+
+   if ((unsigned)(uintptr_t)user_data != netplay_mitm_query_generation)
+      return;   /* superseded or abandoned; not ours to answer */
+
+   netplay_mitm_query_pending     = false;
 
    if (err || !data || !data->data || !data->len || data->status != 200)
    {
@@ -9064,12 +9196,35 @@ static void netplay_mitm_query_cb(retro_task_t *task, void *task_data,
    free(buf);
 }
 
-static bool netplay_mitm_query(const char *handle)
+/* Upper bound on the wait for tunnel information from the lobby
+ * server, in microseconds.  Generous on purpose: timing out a query
+ * that would have succeeded costs the user their hosted session,
+ * while waiting a few seconds longer costs only patience. */
+#define NETPLAY_MITM_QUERY_TIMEOUT (10 * 1000 * 1000)
+
+/* The tunnel query, split into begin / is_ready / result.
+ *
+ * Split rather than moved: netplay_mitm_query() below still calls all
+ * three back to back, so behaviour is exactly what it was.  The point
+ * is that "ask" and "wait for the answer" are no longer welded
+ * together, which is what a later change needs in order to start the
+ * query when the user opens the host UI and have the answer waiting
+ * by the time host setup runs.
+ *
+ * Returns false if the query could not be issued at all.  A custom
+ * relay needs no query, so it fills the address in directly and
+ * reports ready immediately. */
+static bool netplay_mitm_query_begin(const char *handle)
 {
    net_driver_state_t  *net_st    = &networking_driver_st;
    struct netplay_room *host_room = &net_st->host_room;
+
    if (!handle || !*handle)
       return false;
+
+   strlcpy(netplay_mitm_query_handle, handle,
+         sizeof(netplay_mitm_query_handle));
+
    /* We don't need to query,
       if we are using a custom relay server. */
    if (string_is_equal(handle, "custom"))
@@ -9088,21 +9243,145 @@ static bool netplay_mitm_query(const char *handle)
 
       strlcpy(host_room->mitm_address, addr, sizeof(host_room->mitm_address));
       host_room->mitm_port = (int)port;
+
+      /* Supersede anything still in flight.  A custom relay answers
+       * synchronously, and the old code returned here without ever
+       * consulting the pending flag - so an earlier query left
+       * outstanding must not make this one wait, and its callback
+       * must not later overwrite the address just set. */
+      ++netplay_mitm_query_generation;
+      netplay_mitm_query_pending = false;
+
+      return true;
    }
-   else
+
    {
       char query[256];
       size_t _len = strlcpy(query, FILE_PATH_LOBBY_LIBRETRO_URL "tunnel?name=",
             sizeof(query));
       strlcpy(query + _len, handle, sizeof(query) - _len);
+      netplay_mitm_query_pending = true;
+      ++netplay_mitm_query_generation;
+
       if (!task_push_http_transfer(query, true, NULL,
-            netplay_mitm_query_cb, NULL))
+            netplay_mitm_query_cb,
+            (void*)(uintptr_t)netplay_mitm_query_generation))
+      {
+         netplay_mitm_query_pending = false;
          return false;
-      /* Make sure we've the tunnel address before continuing. */
-      task_queue_wait(NULL, NULL);
+      }
    }
 
+   return true;
+}
+
+/* Whether the answer has arrived.  A custom relay was answered
+ * synchronously in begin(), so this is true straight away there. */
+static bool netplay_mitm_query_ready(void)
+{
+   return !netplay_mitm_query_pending;
+}
+
+/* Blocks until the answer arrives or the bound expires.
+ *
+ * The bound matters because this is a round trip to a machine we do
+ * not control.  A lobby server that is down, blackholed or simply
+ * slow left the frontend hung with no way out but killing it.  On
+ * timeout this reports failure like any other query and the caller
+ * falls back to direct mode with a warning - an outcome the user can
+ * see and act on, which an indefinite hang is not.
+ *
+ * Generous on purpose: a false timeout breaks hosting that would have
+ * worked, which is worse than the wait it prevents. */
+static bool netplay_mitm_query_await(void)
+{
+   if (netplay_mitm_query_ready())
+      return true;
+
+   if (!task_queue_wait_timeout(netplay_mitm_query_is_pending, NULL,
+         NETPLAY_MITM_QUERY_TIMEOUT))
+   {
+      RARCH_WARN("[Netplay] Timed out waiting for tunnel information"
+            " from the lobby server.\n");
+      /* Bump the generation so the in-flight callback, which may
+       * still arrive, does not write an address for a session that
+       * has already fallen back to direct mode. */
+      ++netplay_mitm_query_generation;
+      netplay_mitm_query_pending = false;
+      return false;
+    }
+
+   return true;
+}
+
+/* What the query produced: an address and port, or nothing. */
+static bool netplay_mitm_query_result(void)
+{
+   net_driver_state_t  *net_st    = &networking_driver_st;
+   struct netplay_room *host_room = &net_st->host_room;
+
    return *host_room->mitm_address && host_room->mitm_port;
+}
+
+/* Whether an answer for @handle is already in hand or on its way,
+ * so asking again would be a second round trip for the same thing.
+ *
+ * A prefetched query that came back EMPTY is deliberately not
+ * reused: a transient lobby failure at prefetch time would otherwise
+ * doom a hosted session that asking again would have got, which is a
+ * worse trade than one extra request. */
+static bool netplay_mitm_query_have(const char *handle)
+{
+   if (!handle || !*handle)
+      return false;
+   if (!string_is_equal(handle, netplay_mitm_query_handle))
+      return false;
+
+   return !netplay_mitm_query_ready() || netplay_mitm_query_result();
+}
+
+static bool netplay_mitm_query(const char *handle)
+{
+   if (!netplay_mitm_query_have(handle))
+      if (!netplay_mitm_query_begin(handle))
+         return false;
+
+   if (!netplay_mitm_query_await())
+      return false;
+
+   return netplay_mitm_query_result();
+}
+
+/* Start the tunnel query early.
+ *
+ * Called when the user commits to hosting, which is well before host
+ * setup needs the address - and on the content-reload path, before
+ * the content has even loaded.  The query runs during that time, so
+ * by the time netplay_mitm_query() is reached the answer is usually
+ * already there and its wait costs nothing.
+ *
+ * Best effort in the strictest sense: it changes nothing except when
+ * the round trip happens.  If it fails, is skipped, or the user
+ * changes relay servers afterwards, host setup issues the query
+ * exactly as it did before. */
+void netplay_mitm_query_prefetch(void)
+{
+   settings_t *settings = config_get_ptr();
+   const char *handle;
+
+   if (!settings || !settings->bools.netplay_use_mitm_server)
+      return;
+
+   handle = settings->arrays.netplay_mitm_server;
+
+   if (!handle || !*handle)
+      return;
+
+   /* Already asked, and the answer is here or coming. */
+   if (netplay_mitm_query_have(handle))
+      return;
+
+   netplay_mitm_query_begin(handle);
 }
 
 int16_t input_state_net(unsigned port, unsigned device,

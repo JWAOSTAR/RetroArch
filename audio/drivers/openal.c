@@ -15,6 +15,7 @@
  */
 
 #include <stdlib.h>
+#include <retro_atomic.h>
 #include <string.h>
 #include <time.h>
 
@@ -34,11 +35,34 @@
 #include <retro_timers.h>
 #include <lists/string_list.h>
 #include <string/stdstring.h>
+#ifdef HAVE_THREADS
+#include <rthreads/rthreads.h>
+#endif
 
 #include "../audio_driver.h"
 #include "../../verbosity.h"
 
-#define OPENAL_BUFSIZE 1024
+/* AL_SOFT_events, declared here rather than through alext.h, which
+ * Apple's framework does not ship. Resolved through alGetProcAddress()
+ * at init, so a library without it (that framework, older builds)
+ * takes the sleep-poll path below and nothing here refers to a symbol
+ * it lacks. The mixer thread raises BUFFER_COMPLETED the moment a
+ * queued buffer has played, which is the wake this driver otherwise
+ * has to poll for. */
+#define AL_EVENT_TYPE_BUFFER_COMPLETED_SOFT 0x19A4
+#define AL_EVENT_TYPE_DISCONNECTED_SOFT     0x19A6
+typedef void (AL_APIENTRY *al_event_proc_t)(ALenum event_type, ALuint object,
+      ALuint param, ALsizei length, const ALchar *message, void *user);
+typedef void (AL_APIENTRY *al_event_control_t)(ALsizei count,
+      const ALenum *types, ALboolean enable);
+typedef void (AL_APIENTRY *al_event_callback_t)(al_event_proc_t callback,
+      void *user);
+
+/* The unit queued to the source: 1024 bytes for stereo, as it always
+ * was, made a multiple of the frame for a wider layout (3072 for six
+ * channels), since a buffer's size must be whole frames. */
+#define OPENAL_BUFSIZE_BASE 1024
+#define OPENAL_BUFSIZE (al->bufsize)
 
 typedef struct al
 {
@@ -47,12 +71,33 @@ typedef struct al
    ALuint *res_buf;
    ALCdevice *handle;
    ALCcontext *ctx;
+#ifdef HAVE_THREADS
+   /* Signalled from the mixer thread's event callback; waited on in
+    * al_get_buffer() and al_wait_writable() when events are present. */
+   slock_t *lock;
+   scond_t *cond;
+   /* Bumped by the callback under lock; the waiter sleeps only while
+    * it is unchanged, and never holds the lock across an AL call. */
+   unsigned completed;
+#endif
+   al_event_control_t  event_control;
+   al_event_callback_t event_callback;
    size_t res_ptr;
    ALsizei num_buffers;
    int rate;
    ALenum format;
+   unsigned bufsize;     /* bytes per queued buffer, whole frames */
+   unsigned frame_size;  /* bytes per frame at the opened format */
+   uint32_t layout;      /* the frontend's mask the source plays */
    bool nonblock;
    bool is_paused;
+   bool events;
+   /* Raised by the DISCONNECTED event: the device is not coming back,
+    * so no wait for it has anything to wait for. */
+   bool disconnected;
+   /* Frames the source has finished playing, for the sink rate
+    * estimate; see al_frames_consumed(). */
+   retro_atomic_size_t consumed;
 } al_t;
 
 static void al_free(void *data)
@@ -61,6 +106,11 @@ static void al_free(void *data)
 
    if (!al)
       return;
+
+   /* Before the source and context go: the mixer thread may call back
+    * until the callback is cleared. */
+   if (al->events && al->event_callback)
+      al->event_callback(NULL, NULL);
 
    alSourceStop(al->source);
    alDeleteSources(1, &al->source);
@@ -76,8 +126,73 @@ static void al_free(void *data)
       alcDestroyContext(al->ctx);
    if (al->handle)
       alcCloseDevice(al->handle);
+#ifdef HAVE_THREADS
+   if (al->lock)
+      slock_free(al->lock);
+   if (al->cond)
+      scond_free(al->cond);
+#endif
    free(al);
 }
+
+#ifdef HAVE_THREADS
+/* Runs on the mixer thread. Takes no AL call - the extension forbids
+ * it here - and only wakes whoever is waiting for a buffer. */
+static void AL_APIENTRY al_event_cb(ALenum event_type, ALuint object,
+      ALuint param, ALsizei length, const ALchar *message, void *user)
+{
+   al_t *al = (al_t*)user;
+   (void)object; (void)param; (void)length; (void)message;
+
+   if (     event_type != AL_EVENT_TYPE_BUFFER_COMPLETED_SOFT
+         && event_type != AL_EVENT_TYPE_DISCONNECTED_SOFT)
+      return;
+
+   slock_lock(al->lock);
+   if (event_type == AL_EVENT_TYPE_DISCONNECTED_SOFT)
+      al->disconnected = true;
+   al->completed++;
+   scond_signal(al->cond);
+   slock_unlock(al->lock);
+}
+
+/* Resolves and arms AL_SOFT_events on the current context. Leaves
+ * al->events false, and the sleep-poll in use, on any library that
+ * lacks it or refuses it. */
+static void al_init_events(al_t *al)
+{
+   ALenum types[2];
+   union { void *p; al_event_control_t  f; } ctl;
+   union { void *p; al_event_callback_t f; } cb;
+
+   if (!alIsExtensionPresent("AL_SOFT_events"))
+      return;
+   ctl.p = alGetProcAddress("alEventControlSOFT");
+   cb.p  = alGetProcAddress("alEventCallbackSOFT");
+   if (!ctl.p || !cb.p)
+      return;
+   if (!(al->lock = slock_new()))
+      return;
+   if (!(al->cond = scond_new()))
+      return;
+
+   al->event_control  = ctl.f;
+   al->event_callback = cb.f;
+   types[0] = AL_EVENT_TYPE_BUFFER_COMPLETED_SOFT;
+   types[1] = AL_EVENT_TYPE_DISCONNECTED_SOFT;
+   alGetError();
+   al->event_control(2, types, AL_TRUE);
+   al->event_callback(al_event_cb, al);
+   if (alGetError() != AL_NO_ERROR)
+   {
+      al->event_control  = NULL;
+      al->event_callback = NULL;
+      return;
+   }
+   al->events = true;
+   RARCH_LOG("[OpenAL] Buffer completion events available; waiting on them rather than polling.\n");
+}
+#endif
 
 static void *al_list_new(void *u)
 {
@@ -109,7 +224,6 @@ static void *al_list_new(void *u)
 
 
 static void *al_init(const char *device, unsigned rate, unsigned latency,
-      unsigned block_frames,
       unsigned *new_rate)
 {
    size_t _latency;
@@ -117,6 +231,8 @@ static void *al_init(const char *device, unsigned rate, unsigned latency,
    al_t *al     = (al_t*)calloc(1, sizeof(al_t));
    if (!al)
       return NULL;
+
+   retro_atomic_size_init(&al->consumed, 0);
 
    if (device)
    {
@@ -174,27 +290,79 @@ static void *al_init(const char *device, unsigned rate, unsigned latency,
       goto error;
 
    alcMakeContextCurrent(al->ctx);
+#ifdef HAVE_THREADS
+   al_init_events(al);
+#endif
 
    al->rate  = rate;
    *new_rate = rate;
 
-   if (alIsExtensionPresent("AL_EXT_FLOAT32"))
+   /* The layout the frontend asked for. AL_EXT_MCFORMATS gives quad,
+    * 5.1 and 7.1 formats in the WAV order (FL FR FC LFE BL BR SL SR),
+    * the frontend's mask order with the rear pair at the back, so
+    * those are what is reported; anything else, or a library without
+    * the extension, is stereo. */
    {
-      al->format      = alGetEnumValue("AL_FORMAT_STEREO_FLOAT32");
-      _latency        = latency * rate * 2 * sizeof(float);
-      RARCH_LOG("[OpenAL] Device supports float sample format\n");
-   }
-   else
-   {
-      al->format      = AL_FORMAT_STEREO16;
-      _latency        = latency * rate * 2 * sizeof(int16_t);
+      bool     have_float = alIsExtensionPresent("AL_EXT_FLOAT32");
+      bool     have_mc    = alIsExtensionPresent("AL_EXT_MCFORMATS");
+      uint32_t want       = audio_driver_requested_layout();
+      unsigned channels   = audio_layout_channels(want);
+      const char *name    = NULL;
+      al->layout          = AUDIO_LAYOUT_STEREO;
+      if (have_mc && channels == 8)
+      {
+         name       = have_float ? "AL_FORMAT_71CHN32" : "AL_FORMAT_71CHN16";
+         al->layout = AUDIO_LAYOUT_STEREO | AUDIO_SPEAKER_FRONT_CENTER | AUDIO_SPEAKER_LOW_FREQUENCY
+               | AUDIO_SPEAKER_BACK_LEFT | AUDIO_SPEAKER_BACK_RIGHT | AUDIO_SPEAKER_SIDE_LEFT | AUDIO_SPEAKER_SIDE_RIGHT;
+      }
+      else if (have_mc && (channels == 6 || channels == 5 || channels == 7))
+      {
+         name       = have_float ? "AL_FORMAT_51CHN32" : "AL_FORMAT_51CHN16";
+         al->layout = AUDIO_LAYOUT_STEREO | AUDIO_SPEAKER_FRONT_CENTER | AUDIO_SPEAKER_LOW_FREQUENCY
+               | AUDIO_SPEAKER_BACK_LEFT | AUDIO_SPEAKER_BACK_RIGHT;
+      }
+      else if (have_mc && channels == 4)
+      {
+         name       = have_float ? "AL_FORMAT_QUAD32" : "AL_FORMAT_QUAD16";
+         al->layout = AUDIO_LAYOUT_STEREO | AUDIO_SPEAKER_BACK_LEFT | AUDIO_SPEAKER_BACK_RIGHT;
+      }
+      else if (channels > 2)
+         RARCH_LOG("[OpenAL] Layout 0x%03x asked for %u channels; %s, opening stereo.\n",
+               want, channels, have_mc ? "no format for that count" : "the library has no AL_EXT_MCFORMATS");
+      al->format = 0;
+      if (name)
+      {
+         al->format = alGetEnumValue(name);
+         if (al->format == 0 || al->format == -1)
+         {
+            RARCH_WARN("[OpenAL] %s is not known to this library; opening stereo.\n", name);
+            al->layout = AUDIO_LAYOUT_STEREO;
+            al->format = 0;
+         }
+      }
+      if (!al->format)
+      {
+         if (have_float)
+            al->format = alGetEnumValue("AL_FORMAT_STEREO_FLOAT32");
+         else
+            al->format = AL_FORMAT_STEREO16;
+      }
+      if (have_float)
+         RARCH_LOG("[OpenAL] Device supports float sample format\n");
+      al->frame_size = audio_layout_channels(al->layout) * (have_float ? sizeof(float) : sizeof(int16_t));
+      al->bufsize    = OPENAL_BUFSIZE_BASE;
+      while (al->bufsize % al->frame_size)
+         al->bufsize += OPENAL_BUFSIZE_BASE;
+      if (al->layout != AUDIO_LAYOUT_STEREO)
+         RARCH_LOG("[OpenAL] Opened %s: layout 0x%03x.\n", name, al->layout);
+      _latency = latency * rate * al->frame_size;
    }
 
    al->num_buffers = (ALsizei)(_latency / (1000 * OPENAL_BUFSIZE));
    if (al->num_buffers < 2)
       al->num_buffers = 2;
 
-   RARCH_LOG("[OpenAL] Using %u buffers of %u bytes (%s format).\n", (unsigned)al->num_buffers, OPENAL_BUFSIZE, (al->format == AL_FORMAT_STEREO16) ? "integer" : "float");
+   RARCH_LOG("[OpenAL] Using %u buffers of %u bytes (%s format).\n", (unsigned)al->num_buffers, OPENAL_BUFSIZE, (al->frame_size == audio_layout_channels(al->layout) * sizeof(int16_t)) ? "integer" : "float");
 
    al->buffers = (ALuint*)calloc(al->num_buffers, sizeof(ALuint));
    al->res_buf = (ALuint*)calloc(al->num_buffers, sizeof(ALuint));
@@ -216,34 +384,117 @@ error:
    return NULL;
 }
 
+/* The device may have gone (a disconnected default device, a lost
+ * context), in which case AL_BUFFERS_PROCESSED is never delivered.
+ * Bound the sleep-poll in al_get_buffer() so a write against such a
+ * device returns short rather than never. */
+#define OPENAL_GET_BUFFER_WAIT_MS 200
+/* Granularity of the event wait: an event ends it early, so this is
+ * only how often a device that sends none is re-checked. */
+#define OPENAL_WAIT_STEP_MS 50
+
 static bool al_unqueue_buffers(al_t *al)
 {
-   ALint val;
+   ALint val = 0;
+   ALsizei room;
 
+   alGetError();
    alGetSourcei(al->source, AL_BUFFERS_PROCESSED, &val);
 
+   /* On a failed query val is whatever it was, so it starts at zero
+    * and the error is checked; and the count is capped to the slots
+    * left in res_buf, which the processed count can never exceed on a
+    * healthy source but which no query result is allowed to overrun. */
+   if (alGetError() != AL_NO_ERROR || val <= 0)
+      return false;
+   room = al->num_buffers - (ALsizei)al->res_ptr;
+   if (val > room)
+      val = room;
    if (val <= 0)
       return false;
 
    alSourceUnqueueBuffers(al->source, val, &al->res_buf[al->res_ptr]);
+   if (alGetError() != AL_NO_ERROR)
+      return false;
    al->res_ptr += val;
+   /* Buffers the source has finished with are frames the device has
+    * played. Counted here, where they are collected, rather than from
+    * a callback OpenAL does not offer. */
+   retro_atomic_fetch_add_size(&al->consumed,
+         (size_t)val * (OPENAL_BUFSIZE / al->frame_size));
+   return true;
+}
+
+/* Sleep until at least want buffers are free in res_buf, or until the
+ * bound. With events the mixer thread wakes this the moment a buffer
+ * completes; without them there is nothing to wake on, so it sleeps a
+ * millisecond and asks again. Returns false on the bound, on a
+ * disconnected device, or at once in non-blocking mode. */
+static bool al_wait_free(al_t *al, size_t want)
+{
+   int waited_ms = 0;
+
+   if (al->res_ptr >= want)
+      return true;
+   al_unqueue_buffers(al);
+   if (al->res_ptr >= want)
+      return true;
+   if (al->nonblock)
+      return false;
+
+#ifdef HAVE_THREADS
+   if (al->events)
+   {
+      for (;;)
+      {
+         unsigned gen;
+         bool gone;
+
+         /* Read the generation, then ask the device with the lock
+          * released: no AL call is ever made under it. An event that
+          * lands after the read and before the wait changes the
+          * generation, so the wait below is skipped rather than
+          * missed. */
+         slock_lock(al->lock);
+         gen  = al->completed;
+         gone = al->disconnected;
+         slock_unlock(al->lock);
+
+         al_unqueue_buffers(al);
+         if (al->res_ptr >= want)
+            return true;
+         if (gone || waited_ms >= OPENAL_GET_BUFFER_WAIT_MS)
+            return false;
+
+         slock_lock(al->lock);
+         if (al->completed == gen && !al->disconnected)
+         {
+            if (!scond_wait_timeout(al->cond, al->lock,
+                     (int64_t)OPENAL_WAIT_STEP_MS * 1000))
+               waited_ms += OPENAL_WAIT_STEP_MS;
+         }
+         slock_unlock(al->lock);
+      }
+   }
+#endif
+
+   /* No events: sleep-poll. A device that processes nothing within
+    * the bound has stopped, and the caller gets what it managed. */
+   while (al->res_ptr < want)
+   {
+      if (waited_ms >= OPENAL_GET_BUFFER_WAIT_MS)
+         return false;
+      retro_sleep(1);
+      waited_ms++;
+      al_unqueue_buffers(al);
+   }
    return true;
 }
 
 static bool al_get_buffer(al_t *al, ALuint *buffer)
 {
-   while (al->res_ptr == 0)
-   {
-      if (al_unqueue_buffers(al))
-         break;
-
-      if (al->nonblock)
-         return false;
-
-      /* Must sleep as there is no proper blocking method. */
-      retro_sleep(1);
-   }
-
+   if (!al_wait_free(al, 1))
+      return false;
    *buffer = al->res_buf[--al->res_ptr];
    return true;
 }
@@ -329,12 +580,61 @@ static size_t al_buffer_size(void *data)
    return (al->num_buffers) * OPENAL_BUFSIZE;
 }
 
+/* Sleep until at least len bytes fit, capped at half the buffers so
+ * the wait always has an end within a healthy device's reach. Returns
+ * the free space then, or 0 when none came within the bound - a pass
+ * to skip, per the wait_writable() contract - so the threaded
+ * pipeline can pace on the device instead of the inline path. */
+static size_t al_wait_writable(void *data, size_t len)
+{
+   al_t *al    = (al_t*)data;
+   size_t want = (len + OPENAL_BUFSIZE - 1) / OPENAL_BUFSIZE;
+   size_t half = (size_t)al->num_buffers / 2;
+
+   if (want < 1)
+      want = 1;
+   if (want > half)
+      want = half;
+   if (!al_wait_free(al, want))
+      return 0;
+   return al->res_ptr * OPENAL_BUFSIZE;
+}
+
+/* Frames the device has played since the source started.
+ *
+ * OpenAL has no callback per period, so this counts buffers as they
+ * come back processed - the same quantity OpenSL gets from its
+ * callback, collected on the frontend's thread instead. A buffer is
+ * counted once, when it is first seen as processed, so the running
+ * total stays right even though the moment of observation is the
+ * frontend's rather than the device's: a late look moves when a frame
+ * is counted, not how many there are.
+ *
+ * AL_SAMPLE_OFFSET would give the position inside the current buffer
+ * too, but it is per-buffer rather than cumulative and would have to
+ * be stitched to this count to be useful. The buffer quantum here is
+ * 256 frames of int16 stereo, finer than the 480-frame periods the
+ * estimator is already specified to tolerate, so the extra resolution
+ * would buy nothing.
+ */
+static size_t al_frames_consumed(void *data)
+{
+   al_t *al = (al_t*)data;
+   if (!al)
+      return 0;
+   return retro_atomic_load_acquire_size(&al->consumed);
+}
+
 static bool al_use_float(void *data)
 {
    al_t *al = (al_t*)data;
-   if (al->format == AL_FORMAT_STEREO16)
-      return false;
-   return true;
+   return al->frame_size != audio_layout_channels(al->layout) * sizeof(int16_t);
+}
+
+static uint32_t al_layout(void *data)
+{
+   al_t *al = (al_t*)data;
+   return al ? al->layout : AUDIO_LAYOUT_STEREO;
 }
 
 static void al_device_list_free(void *u, void *slp)
@@ -359,5 +659,9 @@ audio_driver_t audio_openal = {
    al_device_list_free,
    al_write_avail,
    al_buffer_size,
-   NULL /* write_raw */
+   NULL, /* write_raw */
+   al_wait_writable,
+   al_frames_consumed,
+   NULL, /* underruns */
+   al_layout
 };

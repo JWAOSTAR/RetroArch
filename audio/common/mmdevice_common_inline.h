@@ -32,6 +32,7 @@
 #include <audioclient.h>
 
 #include <retro_common_api.h>
+#include <retro_atomic.h>
 
 #ifdef __cplusplus
 #define RELEASE(x) \
@@ -98,7 +99,7 @@ typedef struct IMMNotificationClientVtbl {
 #if !defined(_XBOX) && !defined(__WINRT__)
 typedef struct MyNotificationClient {
     IMMNotificationClientVtbl *lpVtbl;
-    LONG refCount;
+    retro_atomic_int_t refCount;
 } MyNotificationClient;
 #endif
 
@@ -111,9 +112,42 @@ DEFINE_GUID(IID_IMMDeviceEnumerator, 0xA95664D2, 0x9614, 0x4F35, 0xA7, 0x46, 0xD
 DEFINE_GUID(CLSID_MMDeviceEnumerator, 0xBCDE0395, 0xE52F, 0x467C, 0x8E, 0x3D, 0xC4, 0x57, 0x92, 0x91, 0x69, 0x2E);
 #undef KSDATAFORMAT_SUBTYPE_IEEE_FLOAT
 DEFINE_GUID(KSDATAFORMAT_SUBTYPE_IEEE_FLOAT, 0x00000003, 0x0000, 0x0010, 0x80, 0x00, 0x00, 0xAA, 0x00, 0x38, 0x9B, 0x71);
+/* The PCM subtype, for a WAVEFORMATEXTENSIBLE of integer samples
+ * wider than stereo; defined here for the same reason the float one
+ * is - MSVC's headers declare it without an instance to link. */
+#undef KSDATAFORMAT_SUBTYPE_PCM
+DEFINE_GUID(KSDATAFORMAT_SUBTYPE_PCM, 0x00000001, 0x0000, 0x0010, 0x80, 0x00, 0x00, 0xAA, 0x00, 0x38, 0x9B, 0x71);
 #endif
 
+/* IEC 61937 over WASAPI: a compressed stream is an exclusive-mode
+ * WAVEFORMATEXTENSIBLE whose subtype names the codec, extended with
+ * the encoded rate, channel count and byte rate; the carrier is
+ * 2-channel 16-bit PCM. Neither MinGW's headers nor MSVC's give an
+ * instance of the subtype GUID to link, and MinGW lacks the struct,
+ * so both are here under our own names. The Dolby Digital subtype is
+ * KSDATAFORMAT_SUBTYPE_IEC61937_DOLBY_DIGITAL, 00000092-0000-0010-
+ * 8000-00aa00389b71. */
+typedef struct
+{
+   WAVEFORMATEXTENSIBLE FormatExt;
+   DWORD dwEncodedSamplesPerSec;
+   DWORD dwEncodedChannelCount;
+   DWORD dwAverageBytesPerSec;
+} mmdevice_iec61937_format_t;
+static const GUID mmdevice_SUBTYPE_IEC61937_DOLBY_DIGITAL =
+   { 0x00000092, 0x0000, 0x0010, { 0x80, 0x00, 0x00, 0xAA, 0x00, 0x38, 0x9B, 0x71 } };
+
 DEFINE_PROPERTYKEY(PKEY_Device_FriendlyName, 0xa45c254e, 0xdf1c, 0x4efd, 0x80, 0x20, 0x67, 0xd1, 0x46, 0xa8, 0x50, 0xe0, 14); /* DEVPROP_TYPE_STRING */
+
+/* IAudioClient3 (Windows 10 1607+): shared-mode streams at an engine
+ * period smaller than the default. Only compiled where the SDK declares
+ * the interface; older SDKs take the IAudioClient path unchanged. The
+ * IID is defined here under our own name rather than relying on the
+ * SDK's IID_IAudioClient3 export, which mingw's libuuid does not carry. */
+#ifdef __IAudioClient3_INTERFACE_DEFINED__
+static const GUID mmdevice_IID_IAudioClient3 =
+   { 0x7ed4ee07, 0x8e67, 0x4cd4, { 0x8c, 0x1a, 0x2b, 0x7a, 0x59, 0x87, 0xad, 0x42 } };
+#endif
 
 #ifdef __cplusplus
 #define _IMMDeviceCollection_Item(This,nDevice,ppdevice) (This)->Item(nDevice,ppdevice)
@@ -132,8 +166,19 @@ DEFINE_PROPERTYKEY(PKEY_Device_FriendlyName, 0xa45c254e, 0xdf1c, 0x4efd, 0x80, 0
 #define _IAudioClient_GetDevicePeriod(This,phnsDefaultDevicePeriod,phnsMinimumDevicePeriod)	( (This)->GetDevicePeriod(phnsDefaultDevicePeriod,phnsMinimumDevicePeriod) )
 #define _IAudioClient_Initialize(This,ShareMode,StreamFlags,hnsBufferDuration,hnsPeriodicity,pFormat,AudioSessionGuid) \
    ( (This)->Initialize(ShareMode,StreamFlags,hnsBufferDuration,hnsPeriodicity,pFormat,AudioSessionGuid))
+#define _IAudioClient_QueryInterface(This,riid,ppv) ( (This)->QueryInterface(riid,ppv) )
+#ifdef __IAudioClient3_INTERFACE_DEFINED__
+#define _IAudioClient3_GetSharedModeEnginePeriod(This,pFormat,pDefault,pFundamental,pMin,pMax) \
+   ( (This)->GetSharedModeEnginePeriod(pFormat,pDefault,pFundamental,pMin,pMax) )
+#define _IAudioClient3_InitializeSharedAudioStream(This,StreamFlags,PeriodInFrames,pFormat,AudioSessionGuid) \
+   ( (This)->InitializeSharedAudioStream(StreamFlags,PeriodInFrames,pFormat,AudioSessionGuid) )
+#define _IAudioClient3_GetCurrentSharedModeEnginePeriod(This,ppFormat,pCurrentPeriodInFrames) \
+   ( (This)->GetCurrentSharedModeEnginePeriod(ppFormat,pCurrentPeriodInFrames) )
+#define _IAudioClient3_Release(This) ( (This)->Release() )
+#endif
 #define _IAudioClient_IsFormatSupported(This,ShareMode,pFormat,ppClosestMatch) \
    ( (This)->IsFormatSupported(ShareMode,pFormat,ppClosestMatch))
+#define _IAudioClient_GetMixFormat(This,ppDeviceFormat) ( (This)->GetMixFormat(ppDeviceFormat) )
 #define _IMMDevice_Activate(This,iid,dwClsCtx,pActivationParams,ppv) ((This)->Activate(iid,(dwClsCtx),pActivationParams,ppv))
 #define _IMMDeviceEnumerator_EnumAudioEndpoints(This,dataFlow,dwStateMask,ppDevices) (This)->EnumAudioEndpoints(dataFlow,dwStateMask,ppDevices)
 #define _IMMDeviceEnumerator_GetDefaultAudioEndpoint(This,dataFlow,role,ppEndpoint) (This)->GetDefaultAudioEndpoint(dataFlow,role,ppEndpoint)
@@ -166,8 +211,19 @@ DEFINE_PROPERTYKEY(PKEY_Device_FriendlyName, 0xa45c254e, 0xdf1c, 0x4efd, 0x80, 0
 #define _IAudioClient_GetDevicePeriod(This,phnsDefaultDevicePeriod,phnsMinimumDevicePeriod)	( (This)->lpVtbl -> GetDevicePeriod(This,phnsDefaultDevicePeriod,phnsMinimumDevicePeriod) )
 #define _IAudioClient_Initialize(This,ShareMode,StreamFlags,hnsBufferDuration,hnsPeriodicity,pFormat,AudioSessionGuid) \
    ( (This)->lpVtbl->Initialize(This,ShareMode,StreamFlags,hnsBufferDuration,hnsPeriodicity,pFormat,AudioSessionGuid))
+#define _IAudioClient_QueryInterface(This,riid,ppv) ( (This)->lpVtbl->QueryInterface(This,riid,ppv) )
+#ifdef __IAudioClient3_INTERFACE_DEFINED__
+#define _IAudioClient3_GetSharedModeEnginePeriod(This,pFormat,pDefault,pFundamental,pMin,pMax) \
+   ( (This)->lpVtbl->GetSharedModeEnginePeriod(This,pFormat,pDefault,pFundamental,pMin,pMax) )
+#define _IAudioClient3_InitializeSharedAudioStream(This,StreamFlags,PeriodInFrames,pFormat,AudioSessionGuid) \
+   ( (This)->lpVtbl->InitializeSharedAudioStream(This,StreamFlags,PeriodInFrames,pFormat,AudioSessionGuid))
+#define _IAudioClient3_GetCurrentSharedModeEnginePeriod(This,ppFormat,pCurrentPeriodInFrames) \
+   ( (This)->lpVtbl->GetCurrentSharedModeEnginePeriod(This,ppFormat,pCurrentPeriodInFrames) )
+#define _IAudioClient3_Release(This) ( (This)->lpVtbl->Release(This) )
+#endif
 #define _IAudioClient_IsFormatSupported(This,ShareMode,pFormat,ppClosestMatch) \
    ( (This)->lpVtbl->IsFormatSupported(This,ShareMode,pFormat,ppClosestMatch))
+#define _IAudioClient_GetMixFormat(This,ppDeviceFormat) ( (This)->lpVtbl->GetMixFormat(This,ppDeviceFormat) )
 #define _IMMDevice_Activate(This,iid,dwClsCtx,pActivationParams,ppv) ((This)->lpVtbl->Activate(This,&(iid),dwClsCtx,pActivationParams,ppv))
 #define _IMMDeviceEnumerator_EnumAudioEndpoints(This,dataFlow,dwStateMask,ppDevices) (This)->lpVtbl->EnumAudioEndpoints(This,dataFlow,dwStateMask,ppDevices)
 #define _IMMDeviceEnumerator_GetDefaultAudioEndpoint(This,dataFlow,role,ppEndpoint) (This)->lpVtbl->GetDefaultAudioEndpoint(This,dataFlow,role,ppEndpoint)

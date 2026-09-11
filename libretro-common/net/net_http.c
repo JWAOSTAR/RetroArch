@@ -170,11 +170,23 @@ struct http_t
 {
    net_http_sink_t sink;
    void *sink_data;
+   /* The transport stage that failed (a literal such as
+    * "ssl_connect_failed") and the library code that went with it,
+    * for net_http_failure().  NULL/0 until something fails. */
+   const char *fail_stage;
+   int fail_code;
    bool err;
 
    struct conn_pool_entry *conn;
    bool ssl;
    bool request_sent;
+   /* conn came out of the pool rather than being opened for this
+    * request; such a connection may have been closed by the peer
+    * while idle. */
+   bool conn_reused;
+   /* The request has already been replayed once on a fresh
+    * connection; it will not be replayed again. */
+   bool retried;
 
    request_t request;
    response_t response;
@@ -199,16 +211,22 @@ struct http_connection_t
 };
 
 static void net_http_log_transport_state(
-      const struct http_t *state, const char *stage, ssize_t io_len)
+      struct http_t *state, const char *stage, ssize_t io_len)
 {
 #if defined(DEBUG)
-   const char *method = "GET";
-   const char *domain = "<null>";
-   const char *path   = "<null>";
    int port           = 0;
    int fd             = -1;
    int connected      = 0;
-
+   const char *method = "GET";
+   const char *domain = "<null>";
+   const char *path   = "<null>";
+#endif
+   /* Keep the first failure: a connect that fails on one address and
+    * then another says the same thing twice, while a later stage
+    * failing because of an earlier one says less. */
+   if (state && !state->fail_stage)
+      state->fail_stage = stage;
+#if defined(DEBUG)
    if (state)
    {
       method = state->request.method ? state->request.method : "GET";
@@ -239,10 +257,6 @@ static void net_http_log_transport_state(
          errno,
          strerror(errno));
    fflush(stderr);
-#else
-   (void)state;
-   (void)stage;
-   (void)io_len;
 #endif
 }
 
@@ -758,8 +772,16 @@ static void net_http_conn_pool_free(struct conn_pool_entry *entry)
 #ifdef HAVE_SSL
    if (entry->ssl && entry->ssl_ctx)
    {
+      /* ssl_socket_close() closes the underlying descriptor itself
+       * (net_ctx.fd in net_socket_ssl_mbed.c, state->fd in
+       * net_socket_ssl_bear.c -- both hold the descriptor in
+       * entry->fd), so mark the fd consumed: a second close below
+       * would race descriptor reuse and close an fd owned by another
+       * thread -- on Android, fdsan aborts when Binder wins that
+       * race. */
       ssl_socket_close(entry->ssl_ctx);
       ssl_socket_free(entry->ssl_ctx);
+      entry->fd = -1;
    }
 #endif
    if (entry->fd >= 0)
@@ -1122,6 +1144,9 @@ static bool net_http_connect(struct http_t *state)
    struct addrinfo *addr = NULL, *next_addr = NULL;
    struct conn_pool_entry *conn = state->conn;
    struct dns_cache_entry *dns_entry;
+#ifdef HAVE_SSL
+   bool timeout          = true;
+#endif
 
    /* net_http_dns_cache_find() is not a read-only lookup: it calls
     * net_http_dns_cache_remove_expired(), which unlinks entries,
@@ -1174,7 +1199,7 @@ static bool net_http_connect(struct http_t *state)
           https://github.com/libretro/RetroArch/issues/14742 */
 
          /* Temp fix, don't use new timeout/poll code for cheevos http requests */
-         bool timeout = true;
+         timeout = true;
 #ifdef _WIN32
          if (!strcmp(state->request.domain, "retroachievements.org"))
             timeout = false;
@@ -1182,6 +1207,8 @@ static bool net_http_connect(struct http_t *state)
 
          if (ssl_socket_connect(conn->ssl_ctx, next_addr, timeout, true) < 0)
          {
+            if (!state->fail_stage)
+               state->fail_code = ssl_socket_last_error(conn->ssl_ctx);
             net_http_log_transport_state(state, "ssl_connect_failed", -1);
             ssl_socket_close(conn->ssl_ctx);
             ssl_socket_free(conn->ssl_ctx);
@@ -1221,6 +1248,43 @@ static bool net_http_connect(struct http_t *state)
    }
 }
 
+/**
+ * net_http_retry_fresh:
+ *
+ * A pooled connection that the peer closed while it sat idle fails
+ * either on the first send or on the first recv, before a single
+ * byte of the response has arrived.  Replay the request once on a
+ * fresh connection in that case.  Nothing is retried once any
+ * response byte has been seen, and a connection opened for this
+ * request is never retried at all.
+ *
+ * @return true if the request has been rearmed and net_http_update()
+ * should keep going, false if the failure stands.
+ **/
+static bool net_http_retry_fresh(struct http_t *state)
+{
+   if (!state->conn_reused || state->retried || state->response.pos)
+      return false;
+
+   net_http_log_transport_state(state, "retry_on_fresh_connection", -1);
+
+   if (state->conn)
+      net_http_conn_pool_remove(state->conn);
+
+   state->conn            = NULL;
+   state->conn_reused     = false;
+   state->retried         = true;
+   state->err             = false;
+   state->request_sent    = false;
+   state->fail_stage      = NULL;
+   state->fail_code       = 0;
+   state->response.part   = P_HEADER_TOP;
+   state->response.pos    = 0;
+   state->response.len    = 0;
+   state->response.status = -1;
+   return true;
+}
+
 static void net_http_send_str(
       struct http_t *state, const char *text, size_t text_size)
 {
@@ -1251,6 +1315,18 @@ static void net_http_send_str(
 static bool net_http_send_request(struct http_t *state)
 {
    struct request *request = (struct request*)&state->request;
+
+   if (     request->method
+         && request->method[0] == 'P'
+         && request->method[1] == 'O' /* POST, not PUT */
+         && !request->postdata
+         && request->contentlength > 0)
+   {
+      state->err = true;
+      net_http_log_transport_state(state, "post_without_payload", -1);
+      return true;
+   }
+
    /* This is a bit lazy, but it works. */
    if (request->method)
    {
@@ -1287,14 +1363,6 @@ static bool net_http_send_request(struct http_t *state)
    {
       size_t _len;
       int    len;
-      if (     !request->postdata
-            && request->method[1] == 'O' /* POST, not PUT */
-            && request->contentlength > 0)
-      {
-         state->err = true;
-         net_http_log_transport_state(state, "post_without_payload", -1);
-         return true;
-      }
       if (!request->headers && !request->contenttype)
          net_http_send_str(state,
                "Content-Type: application/x-www-form-urlencoded\r\n",
@@ -1968,6 +2036,7 @@ static bool net_http_redirect(struct http_t *state, const char *location)
       }
    }
    state->request_sent       = false;
+   state->retried            = false;
    state->response.part      = P_HEADER_TOP;
    state->response.status    = -1;
    /* Start with larger buffer to reduce reallocations */
@@ -2105,7 +2174,11 @@ bool net_http_update(struct http_t *state, size_t* progress, size_t* total)
 
    if (!state->conn)
    {
-      state->conn = net_http_conn_pool_find(state->request.domain, state->request.port);
+      /* A replayed request goes out on a connection of its own;
+       * the pool is what it is recovering from. */
+      if (!state->retried)
+         state->conn = net_http_conn_pool_find(state->request.domain, state->request.port);
+      state->conn_reused = (state->conn != NULL);
       if (!state->conn)
       {
          if (!net_http_new_socket(state))
@@ -2122,7 +2195,11 @@ bool net_http_update(struct http_t *state, size_t* progress, size_t* total)
    }
 
    if (!state->request_sent)
-      return net_http_send_request(state);
+   {
+      if (net_http_send_request(state) && net_http_retry_fresh(state))
+         return false;
+      return state->err;
+   }
 
    response = (struct response*)&state->response;
 
@@ -2235,6 +2312,8 @@ bool net_http_update(struct http_t *state, size_t* progress, size_t* total)
             {
                net_http_log_transport_state(state,
                      "receive_header_failed", _len);
+               if (net_http_retry_fresh(state))
+                  return false;
                net_http_conn_pool_remove(state->conn);
                state->conn      = NULL;
                state->err       = true;
@@ -2357,6 +2436,11 @@ struct string_list *net_http_headers_ex(struct http_t *state, bool accept_err)
 {
    if (!state)
       return NULL;
+   /* Same predicate as net_http_data(): with no status line there is
+    * no header set, only the empty (or half-filled) list allocated by
+    * net_http_new(). */
+   if (state->response.status < 0)
+      return NULL;
    if (!accept_err && state->err)
       return NULL;
    state->response.owns_headers = false;
@@ -2381,6 +2465,26 @@ uint8_t* net_http_data(struct http_t *state, size_t* len, bool accept_err)
 {
    if (!state)
       return NULL;
+
+   /* No response was ever parsed, so there is no body to hand back.
+    *
+    * net_http_new() allocates response.data up front as the receive
+    * buffer -- 64KiB of plain malloc().  On a transport failure
+    * nothing is written into it and response.len stays 0, but the
+    * pointer is non-NULL, and accept_err skipped the check below and
+    * returned it: 64KiB of uninitialised, unterminated heap published
+    * as a body.  A torn body is equally unusable, since response.len
+    * is the T_LEN remainder rather than the bytes that landed.
+    *
+    * Every give-up path resets status to -1 (and net_http_new()
+    * initialises it so), which is the exact predicate.  Returning NULL
+    * leaves owns_data true, so net_http_delete() frees the buffer. */
+   if (state->response.status < 0)
+   {
+      if (len)
+         *len = 0;
+      return NULL;
+   }
 
    if (!accept_err && (state->err || state->response.status < 200 || state->response.status > 299))
    {
@@ -2452,4 +2556,11 @@ void net_http_delete(struct http_t *state)
 bool net_http_error(struct http_t *state)
 {
    return (state->err || state->response.status < 200 || state->response.status > 299);
+}
+
+const char *net_http_failure(struct http_t *state, int *code)
+{
+   if (code)
+      *code = state ? state->fail_code : 0;
+   return state ? state->fail_stage : NULL;
 }

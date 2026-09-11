@@ -1365,7 +1365,6 @@ static const struct
    char s_012938fb[23];
    char s_a747cdc9[55];
    char s_2f169651[21];
-   char s_73674a86[18];
    char s_705eee28[42];
    char s_62af62ac[32];
    char s_12b25a4b[66];
@@ -1484,7 +1483,6 @@ static const struct
    char s_74b77b4a[14];
    char s_7534cfc9[6];
    char s_36259b63[15];
-   char s_37368130[11];
    char s_d51f54a2[13];
    char s_b35f573c[6];
    char s_1cad7751[13];
@@ -1856,7 +1854,6 @@ static const struct
    char s_c7bc8298[24];
    char s_e63b035a[15];
    char s_d21d875b[10];
-   char s_ae86fed0[23];
    char s_b12ae22e[13];
    char s_b2d073c7[19];
    char s_1cbc2657[14];
@@ -3203,16 +3200,10 @@ static const struct
 #ifdef HAVE_SMBCLIENT
    char s_3e1e294b[52];
    char s_69c0e487[55];
-   char s_706ff4dc[202];
    char s_a0d1a85c[78];
-   char s_b5966528[29];
    char s_907ef7cc[29];
    char s_b0a46506[52];
-   char s_04624c88[64];
-   char s_91976dbe[29];
    char s_f6492edc[41];
-   char s_9bb85635[35];
-   char s_22a05685[25];
 #endif
    char s_f3bfa8b9[90];
    char s_5fe2cee5[76];
@@ -3394,7 +3385,6 @@ static const struct
    char s_36033606[198];
    char s_2e69508b[363];
    char s_7e96b5ce[44];
-   char s_3547866d[158];
    char s_c2314d30[192];
 #if defined(RARCH_MOBILE)
    char s_82c9e375[175];
@@ -5505,7 +5495,6 @@ static const struct
    "Miniatuur-schaalfactor",
    "Afspeellijstnamen afkappen (opnieuw opstarten vereist)",
    "PAL60 Mode Activeren",
-   "Bovenliggende map",
    "Pauzeer inhoud wanneer het menu actief is",
    "Pauzeer Inhoud op inactiviteit ",
    "Inhoud pauzeren wanneer de verbinding met de controller verbreekt",
@@ -5624,7 +5613,6 @@ static const struct
    "&Ontlaad core",
    "&hulp",
    "Over RetroArch",
-   "bijdragers",
    "Documentatie",
    "Legen",
    "&Gereedschap",
@@ -6002,7 +5990,6 @@ static const struct
    "SMB netwerkinstellingen",
    "SMB share naam",
    "SMB share",
-   "SMB submap (optioneel)",
    "SMB time-out",
    "SMB gebruikersnaam",
    "SMB werkgroep",
@@ -7696,18 +7683,10 @@ static const struct
 #ifdef HAVE_SMBCLIENT
    "Selecteer de authenticatie gebruikt in je omgeving.",
    "Blader door bestanden op de geconfigureerde SMB share.",
-   "Schakel toegang tot SMB-netwerkshares in. Ethernet wordt sterk aanbevolen boven Wi-Fi voor een b"
-   "etrouwbaardere verbinding. Let op: het wijzigen van deze instellingen vereist een herstart van R"
-   "etroArch.",
    "Selecteer het maximale aantal verbindingen dat in he omgeving wordt gebruikt.",
-   "Wachtwoord voor verificatie.",
    "Server IP-adres of hostnaam.",
    "Configureer de instellingen voor SMB-netwerkshares.",
-   "Naam van de netwerkshare waartoe toegang moet worden verkregen.",
-   "Pad naar submap op de share.",
    "Selecteer standaard timeout in seconden.",
-   "Gebruikersnaam voor authenticatie.",
-   "Werkgroep of domeinnaam.",
 #endif
    "Sorteer de slaag-bestanden in folders vernoemd naar de map waarin de inhoud zich bevindt.",
    "Sorteer opslagbestanden in mappen die zijn vernoemd naar de gebruikte core.",
@@ -7965,8 +7944,6 @@ static const struct
    "erapporteerde framesnelheid, wat zorgt voor een verbeterde framepacing bij het hardlopen van b.v"
    ". 30 fps-inhoud op een 60 Hz-scherm of 60 fps-inhoud op een 120 Hz-scherm.",
    "Video-synchronisatie instellingen wijzigen.",
-   "Verbetert prestaties ten koste van latentie en vloeiendheid van het beeld. Gebruik dit alleen wa"
-   "nneer het afspelen op volle snelheid niet anders mogelijk is.",
    "Probeer de prestaties te verbeteren door de Metal-argumentbuffers te gebruiken. Voor sommige cor"
    "es kan dit nodig zijn. Dit kan sommige shaders breken, met name op oude hardware of OS versies.",
 #if defined(RARCH_MOBILE)
@@ -8595,7 +8572,7 @@ static const struct
  * compiler that pads this struct fails here instead of
  * misindexing at runtime. */
 typedef char msg_hash_nl_blob_check[
-      (sizeof(msg_hash_nl_blob) == (174538u
+      (sizeof(msg_hash_nl_blob) == (174351u
 #ifdef ANDROID
        + 375u
 #endif
@@ -8730,7 +8707,6 @@ typedef char msg_hash_nl_blob_check[
        + 24u
        + 15u
        + 10u
-       + 23u
        + 13u
        + 19u
        + 14u
@@ -8916,16 +8892,10 @@ typedef char msg_hash_nl_blob_check[
        + 32u
        + 52u
        + 55u
-       + 202u
        + 78u
        + 29u
-       + 29u
        + 52u
-       + 64u
-       + 29u
        + 41u
-       + 35u
-       + 25u
 #endif
 #ifdef HAVE_LAKKA
        + 46u
@@ -9250,7 +9220,6 @@ static const uint32_t msg_hash_nl_ids[] =
    (uint32_t)MENU_ENUM_LABEL_VALUE_ANDROID_INPUT_DISCONNECT_WORKAROUND,
    (uint32_t)MENU_ENUM_LABEL_VALUE_APPICON_SETTINGS,
    (uint32_t)MENU_ENUM_LABEL_VALUE_AUDIO_ASIO_CONTROL_PANEL,
-   (uint32_t)MENU_ENUM_LABEL_VALUE_AUDIO_BLOCK_FRAMES,
    (uint32_t)MENU_ENUM_LABEL_VALUE_AUDIO_DEVICE,
    (uint32_t)MENU_ENUM_LABEL_VALUE_AUDIO_DRIVER,
    (uint32_t)MENU_ENUM_LABEL_VALUE_AUDIO_DSP_PLUGIN,
@@ -10360,7 +10329,6 @@ static const uint32_t msg_hash_nl_ids[] =
    (uint32_t)MENU_ENUM_LABEL_VALUE_OZONE_THUMBNAIL_SCALE_FACTOR,
    (uint32_t)MENU_ENUM_LABEL_VALUE_OZONE_TRUNCATE_PLAYLIST_NAME,
    (uint32_t)MENU_ENUM_LABEL_VALUE_PAL60_ENABLE,
-   (uint32_t)MENU_ENUM_LABEL_VALUE_PARENT_DIRECTORY,
    (uint32_t)MENU_ENUM_LABEL_VALUE_PAUSE_LIBRETRO,
    (uint32_t)MENU_ENUM_LABEL_VALUE_PAUSE_NONACTIVE,
    (uint32_t)MENU_ENUM_LABEL_VALUE_PAUSE_ON_DISCONNECT,
@@ -10479,7 +10447,6 @@ static const uint32_t msg_hash_nl_ids[] =
    (uint32_t)MENU_ENUM_LABEL_VALUE_QT_MENU_FILE_UNLOAD_CORE,
    (uint32_t)MENU_ENUM_LABEL_VALUE_QT_MENU_HELP,
    (uint32_t)MENU_ENUM_LABEL_VALUE_QT_MENU_HELP_ABOUT,
-   (uint32_t)MENU_ENUM_LABEL_VALUE_QT_MENU_HELP_ABOUT_CONTRIBUTORS,
    (uint32_t)MENU_ENUM_LABEL_VALUE_QT_MENU_HELP_DOCUMENTATION,
    (uint32_t)MENU_ENUM_LABEL_VALUE_QT_MENU_SEARCH_CLEAR,
    (uint32_t)MENU_ENUM_LABEL_VALUE_QT_MENU_TOOLS,
@@ -10850,7 +10817,6 @@ static const uint32_t msg_hash_nl_ids[] =
    (uint32_t)MENU_ENUM_LABEL_VALUE_SMB_CLIENT_SETTINGS,
    (uint32_t)MENU_ENUM_LABEL_VALUE_SMB_CLIENT_SHARE,
    (uint32_t)MENU_ENUM_LABEL_VALUE_SMB_CLIENT_SMB_SHARE,
-   (uint32_t)MENU_ENUM_LABEL_VALUE_SMB_CLIENT_SUBDIR,
    (uint32_t)MENU_ENUM_LABEL_VALUE_SMB_CLIENT_TIMEOUT,
    (uint32_t)MENU_ENUM_LABEL_VALUE_SMB_CLIENT_USERNAME,
    (uint32_t)MENU_ENUM_LABEL_VALUE_SMB_CLIENT_WORKGROUP,
@@ -12197,16 +12163,10 @@ static const uint32_t msg_hash_nl_ids[] =
 #ifdef HAVE_SMBCLIENT
    (uint32_t)MENU_ENUM_SUBLABEL_SMB_CLIENT_AUTH_MODE,
    (uint32_t)MENU_ENUM_SUBLABEL_SMB_CLIENT_BROWSE,
-   (uint32_t)MENU_ENUM_SUBLABEL_SMB_CLIENT_ENABLE,
    (uint32_t)MENU_ENUM_SUBLABEL_SMB_CLIENT_NUM_CONTEXTS,
-   (uint32_t)MENU_ENUM_SUBLABEL_SMB_CLIENT_PASSWORD,
    (uint32_t)MENU_ENUM_SUBLABEL_SMB_CLIENT_SERVER,
    (uint32_t)MENU_ENUM_SUBLABEL_SMB_CLIENT_SETTINGS,
-   (uint32_t)MENU_ENUM_SUBLABEL_SMB_CLIENT_SHARE,
-   (uint32_t)MENU_ENUM_SUBLABEL_SMB_CLIENT_SUBDIR,
    (uint32_t)MENU_ENUM_SUBLABEL_SMB_CLIENT_TIMEOUT,
-   (uint32_t)MENU_ENUM_SUBLABEL_SMB_CLIENT_USERNAME,
-   (uint32_t)MENU_ENUM_SUBLABEL_SMB_CLIENT_WORKGROUP,
 #endif
    (uint32_t)MENU_ENUM_SUBLABEL_SORT_SAVEFILES_BY_CONTENT_ENABLE,
    (uint32_t)MENU_ENUM_SUBLABEL_SORT_SAVEFILES_ENABLE,
@@ -12388,7 +12348,6 @@ static const uint32_t msg_hash_nl_ids[] =
    (uint32_t)MENU_ENUM_SUBLABEL_VIDEO_SMOOTH,
    (uint32_t)MENU_ENUM_SUBLABEL_VIDEO_SWAP_INTERVAL,
    (uint32_t)MENU_ENUM_SUBLABEL_VIDEO_SYNCHRONIZATION_SETTINGS,
-   (uint32_t)MENU_ENUM_SUBLABEL_VIDEO_THREADED,
    (uint32_t)MENU_ENUM_SUBLABEL_VIDEO_USE_METAL_ARG_BUFFERS,
 #if defined(RARCH_MOBILE)
    (uint32_t)MENU_ENUM_SUBLABEL_VIDEO_VIEWPORT_BIAS_PORTRAIT_X,

@@ -406,6 +406,7 @@ typedef struct menu_ctx_driver
    void (*refresh_thumbnail_image)(void *data, size_t i);
    void (*set_thumbnail_content)(void *data, const char *s);
    int  (*osk_ptr_at_pos)(void *data, int x, int y, unsigned width, unsigned height);
+   bool (*osk_pointer_over_textbox)(void *data, int x, int y, unsigned width, unsigned height);
    void (*update_savestate_thumbnail_path)(void *data, unsigned i);
    void (*update_savestate_thumbnail_image)(void *data);
    int (*pointer_down)(void *data, unsigned x, unsigned y, unsigned ptr,
@@ -418,6 +419,12 @@ typedef struct menu_ctx_driver
    /* This will be invoked whenever a menu entry action
     * (menu_entry_action()) is performed */
    int (*entry_action)(void *userdata, menu_entry_t *entry, size_t i, enum menu_action action);
+   /* Move the list itself by the given number of mouse wheel
+    * notches, negative towards the top, leaving the selection
+    * where it is. Drivers whose list position *is* the selection
+    * leave this NULL and keep getting MENU_ACTION_UP/DOWN.
+    * Returns false when the driver cannot scroll right now. */
+   bool (*wheel_scroll)(void *userdata, int notches);
 } menu_ctx_driver_t;
 
 typedef struct
@@ -476,6 +483,9 @@ typedef struct
    char db_playlist_file[PATH_MAX_LENGTH];
    char filebrowser_label[NAME_MAX_LENGTH];
    char detect_content_path[PATH_MAX_LENGTH];
+
+   /* The Content Downloader directory the user last stepped into. */
+   char core_content_dir[NAME_MAX_LENGTH];
 } menu_handle_t;
 
 struct menu_state

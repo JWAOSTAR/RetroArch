@@ -103,6 +103,7 @@ struct shader_uniforms
    int final_vp_size;
 
    int frame_count;
+   int swap_count;
    int frame_direction;
    int frame_time_delta;
    float original_fps;
@@ -192,6 +193,11 @@ typedef struct glsl_shader_data
    struct cache_vbo vbo[GFX_MAX_SHADERS];
    struct shader_program_glsl_data prg[GFX_MAX_SHADERS];
    struct video_shader *shader;
+   /* Staging for set_coords on draws of more than four vertices (font
+    * runs, the menu ribbon), grown on demand and kept for the shader's
+    * lifetime; it was malloc'd and freed on every such draw. */
+   GLfloat *coord_scratch;
+   size_t   coord_scratch_cap;
 } glsl_shader_data_t;
 
 /* TODO/FIXME - static globals */
@@ -515,7 +521,7 @@ static bool gl_glsl_compile_program(
       if (!gl_glsl_compile_shader(
                glsl,
                program->vprg,
-               "#define VERTEX\n#define PARAMETER_UNIFORM\n#define _HAS_ORIGINALASPECT_UNIFORMS\n#define _HAS_FRAMETIME_UNIFORMS\n#define _HAS_SENSOR_UNIFORMS\n",
+               "#define VERTEX\n#define PARAMETER_UNIFORM\n#define _HAS_ORIGINALASPECT_UNIFORMS\n#define _HAS_FRAMETIME_UNIFORMS\n#define _HAS_SENSOR_UNIFORMS\n#define _HAS_SWAPCOUNT_UNIFORM\n",
                program_info->vertex))
       {
          RARCH_ERR("[GLSL] Failed to compile vertex shader #%u.\n", idx);
@@ -530,7 +536,7 @@ static bool gl_glsl_compile_program(
       RARCH_LOG("[GLSL] Found GLSL fragment shader.\n");
       program->fprg = glCreateShader(GL_FRAGMENT_SHADER);
       if (!gl_glsl_compile_shader(glsl, program->fprg,
-               "#define FRAGMENT\n#define PARAMETER_UNIFORM\n#define _HAS_ORIGINALASPECT_UNIFORMS\n#define _HAS_FRAMETIME_UNIFORMS\n#define _HAS_SENSOR_UNIFORMS\n",
+               "#define FRAGMENT\n#define PARAMETER_UNIFORM\n#define _HAS_ORIGINALASPECT_UNIFORMS\n#define _HAS_FRAMETIME_UNIFORMS\n#define _HAS_SENSOR_UNIFORMS\n#define _HAS_SWAPCOUNT_UNIFORM\n",
                program_info->fragment))
       {
          RARCH_ERR("[GLSL] Failed to compile fragment shader #%u.\n", idx);
@@ -669,6 +675,21 @@ static void gl_glsl_set_vbo(GLfloat **buffer, size_t *buffer_elems,
    {
       GLfloat *new_buffer = (GLfloat*)
          realloc(*buffer, elems * sizeof(GLfloat));
+
+      /* The buffer is only a copy of what was last uploaded, so that an
+       * identical set of coords can skip the upload next time. Upload
+       * straight from the caller's data and leave the existing
+       * allocation - realloc keeps it on failure - marked empty, so the
+       * comparison in gl_glsl_set_attribs cannot read it and the next
+       * call retries the grow. */
+      if (!new_buffer)
+      {
+         glBufferData(GL_ARRAY_BUFFER, elems * sizeof(GLfloat),
+               data, GL_STATIC_DRAW);
+         *buffer_elems = 0;
+         return;
+      }
+
       *buffer             = new_buffer;
    }
 
@@ -728,25 +749,25 @@ static void gl_glsl_find_uniforms_frame(glsl_shader_data_t *glsl,
 
    if (frame->texture < 0)
    {
-      strlcpy(uni + _len, "Texture", sizeof(uni) - _len);
+      strlcpy_lit(uni + _len, "Texture", sizeof(uni) - _len);
       frame->texture = gl_glsl_get_uniform(glsl, prog, uni);
    }
 
    if (frame->tex_coord < 0)
    {
-      strlcpy(uni + _len, "TexCoord", sizeof(uni) - _len);
+      strlcpy_lit(uni + _len, "TexCoord", sizeof(uni) - _len);
       frame->tex_coord = gl_glsl_get_attrib(glsl, prog, uni);
    }
 
    if (frame->input_size < 0)
    {
-      strlcpy(uni + _len, "InputSize",   sizeof(uni) - _len);
+      strlcpy_lit(uni + _len, "InputSize",   sizeof(uni) - _len);
       frame->input_size = gl_glsl_get_uniform(glsl, prog, uni);
    }
 
    if (frame->texture_size < 0)
    {
-      strlcpy(uni + _len, "TextureSize", sizeof(uni) - _len);
+      strlcpy_lit(uni + _len, "TextureSize", sizeof(uni) - _len);
       frame->texture_size = gl_glsl_get_uniform(glsl, prog, uni);
    }
 
@@ -779,6 +800,7 @@ static void gl_glsl_find_uniforms(glsl_shader_data_t *glsl,
    uni->final_vp_size    = gl_glsl_get_uniform(glsl, prog, "FinalViewportSize");
 
    uni->frame_count      = gl_glsl_get_uniform(glsl, prog, "FrameCount");
+   uni->swap_count       = gl_glsl_get_uniform(glsl, prog, "SwapCount");
    uni->frame_direction  = gl_glsl_get_uniform(glsl, prog, "FrameDirection");
    uni->frame_time_delta = gl_glsl_get_uniform(glsl, prog, "FrameTimeDelta");
    uni->original_fps         = gl_glsl_get_uniform(glsl, prog, "OriginalFPS");
@@ -906,6 +928,7 @@ static void gl_glsl_deinit(void *data)
    gl_glsl_destroy_resources(glsl);
    input_state_get_ptr()->shader_uses_sensors = false;
 
+   free(glsl->coord_scratch);
    free(glsl);
 }
 
@@ -1416,6 +1439,11 @@ static void gl_glsl_set_params(void *dat, void *shader_data)
       glUniform1i(uni->frame_count, frame_count);
    }
 
+   /* Not modulo'd: SwapCount counts what the display was shown, so a
+    * pass's frame_count_mod has nothing to say about it. */
+   if (uni->swap_count >= 0)
+      glUniform1i(uni->swap_count, (int)params->swap_counter);
+
    if (uni->frame_direction >= 0)
    {
 #ifdef HAVE_REWIND
@@ -1720,10 +1748,15 @@ static bool gl_glsl_set_coords(void *shader_data,
 
       elems        *= coords->vertices * sizeof(GLfloat);
 
-      buffer        = (GLfloat*)malloc(elems);
-
-      if (!buffer)
-         return false;
+      if (elems > glsl->coord_scratch_cap)
+      {
+         GLfloat *grown = (GLfloat*)realloc(glsl->coord_scratch, elems);
+         if (!grown)
+            return false;
+         glsl->coord_scratch     = grown;
+         glsl->coord_scratch_cap = elems;
+      }
+      buffer        = glsl->coord_scratch;
    }
 
 #if defined(VITA)
@@ -1769,9 +1802,6 @@ static bool gl_glsl_set_coords(void *shader_data,
             &glsl->vbo[glsl->active_idx].len_primary,
             buffer, size,
             attribs, attribs_size);
-
-   if (buffer != short_buffer)
-      free(buffer);
 
    return true;
 }

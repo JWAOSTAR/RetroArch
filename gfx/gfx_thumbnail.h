@@ -226,6 +226,9 @@ typedef struct
     * data_transfer_free(anim_dt); anim_buf itself must not be
     * freed). */
    void *anim;
+   /* Shared preview session (gfx_anim_preview_t*) over anim / anim_dt:
+    * the window feeder and the preview audio. Non-owning. */
+   void *anim_sess;
    void *anim_buf;
    struct data_transfer *anim_dt; /* transfer owning anim_buf (and the
                                       adopted nbio handle beneath it)   */
@@ -255,6 +258,14 @@ typedef struct
    uint8_t anim_read_pending; /* adopted nbio read still in flight;
                                  animation/audio held at the static
                                  frame until it completes */
+   /* Asynchronous upload bookkeeping (threaded video). upload_seq is
+    * bumped by gfx_thumbnail_reset(); a completed upload whose seq no
+    * longer matches was superseded and is unloaded on delivery.
+    * anim_inflight is set while one animation frame is on its way to
+    * the video thread; further frames are skipped until it lands, so
+    * a slow present never queues frames faster than it shows them. */
+   uint16_t upload_seq;
+   uint8_t anim_inflight;
    uint8_t anim_windowed;  /* anim_dt is a sliding window fed from the
                               decoder frontier during playback, not a
                               buffer pumped to completion: residency is
@@ -286,6 +297,7 @@ static INLINE void gfx_thumbnail_init_blank(gfx_thumbnail_t *t)
    t->anim            = NULL;
    t->anim_buf        = NULL;
    t->anim_dt         = NULL;
+   t->anim_sess       = NULL;
    t->anim_job        = NULL;
    t->anim_job2       = NULL;
    t->anim_buf_len    = 0;
@@ -302,6 +314,8 @@ static INLINE void gfx_thumbnail_init_blank(gfx_thumbnail_t *t)
    t->anim_job_upload = 0;
    t->anim_read_pending = 0;
    t->anim_windowed   = 0;
+   t->upload_seq      = 0;
+   t->anim_inflight   = 0;
 }
 
 /* Holds all configuration parameters associated

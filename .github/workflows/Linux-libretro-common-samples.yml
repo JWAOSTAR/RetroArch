@@ -23,12 +23,29 @@ jobs:
 
     steps:
       - name: Install dependencies
+        timeout-minutes: 5
         run: |
-          sudo apt-get update -y
-          sudo apt-get install -y build-essential zlib1g-dev clang
+          # All three packages ship on the stock ubuntu-latest image, so
+          # this step is a no-op there and apt is only contacted if the
+          # image ever drops one of them.
+          # ffmpeg (with libx264): formats/h264/rh264_lossless_test builds
+          # its lossless corpus and its reference decodes with it.
+          if dpkg -s build-essential zlib1g-dev clang ffmpeg >/dev/null 2>&1; then
+            echo "All packages already present on runner image; skipping apt."
+            exit 0
+          fi
+          for i in 1 2 3; do
+            sudo timeout 90 apt-get update -y \
+              -o Acquire::Retries=3 -o Acquire::http::Timeout=30 && break
+            echo "apt-get update failed (attempt $i); retrying in 10s"
+            sleep 10
+          done
+          sudo apt-get install -y \
+            -o Acquire::Retries=3 -o Acquire::http::Timeout=30 \
+            build-essential zlib1g-dev clang ffmpeg
 
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v5
 
       - name: Build and run samples
         shell: bash
@@ -57,6 +74,7 @@ jobs:
             snprintf
             unbase64_test
             crc32_test
+            emscripten_mmap_test
             archive_zip_test
             archive_zstd_test
             config_file_test
@@ -66,11 +84,13 @@ jobs:
             rpng
             rzip_chunk_size_test
             rzip_matches_buf_test
+            rzip_codec_test
             data_transfer_source_test
             data_transfer_prefix_test
             data_transfer_window_test
             audio_transfer_window_test
             rjpeg_test
+            rh264_lossless_test
             r7z_lzma_props_test
             vcdiff_test
             net_ifinfo
@@ -78,18 +98,29 @@ jobs:
             vfs_mapped_ptr_test
             vfs_large_file_test
             vfs_seek_contract_test
+            vfs_bulk_read_test
             vfs_hybrid_test
+            filestream_rbuf_fault_test
             cdrom_cuesheet_overflow_test
             cdfs_dir_record_test
+            cdfs_pure_api_test
             chd_meta_overflow_test
             strlcpy_append_test
             http_parse_test
             rjson_test
+            rm3u_test
             rtga_test
             rbmp_test
+            rbmp_encode_test
             rpng_chunk_overflow_test
             rpng_roundtrip_test
             rpng_decode_corpus_test
+            # Benchmark, not a pass/fail test, but it runs its default
+            # 4K comparison and exits 0, so under this job's sanitizer
+            # build it doubles as end-to-end ASan/UBSan smoke coverage
+            # of the old and new screenshot encode/write paths.
+            # Timings in its output are informational only.
+            screenshot_io_bench
             word_wrap_overflow_test
             task_queue_title_error_test
             tpool_wait_test
@@ -98,7 +129,19 @@ jobs:
             retro_atomic_extern_c_linkage_test
             retro_atomic_extern_c_linkage_test_cxx
             retro_spsc_test
+            msg_fifo_queue_test
             audio_mixer_loop_test
+            audio_mixer_rate_guard_test
+            # The AC-3 / E-AC-3 frame layer against ffmpeg's streams:
+            # ffmpeg is in the package list above for it.
+            rac3_frame_test
+            rac3_tables_test
+            rac3_decode_test
+            rac3_encode_test
+            # IEC 61937 bursts against ffmpeg's spdif muxer and demuxer.
+            iec61937_test
+            # The AC-3 arm of audio_transfer against ffmpeg's decode.
+            audio_transfer_ac3_test
           )
 
           # Targets that are built but deliberately not executed, each
@@ -132,6 +175,9 @@ jobs:
           # regressions but not executed.
           declare -a BUILD_ONLY_DIRS=(
             formats/xml
+            # A benchmark, not a test: its numbers only mean something
+            # on two dedicated physical cores, which a runner is not.
+            queues/retro_spsc_bench
           )
 
           # Samples that are currently broken at build time on a stock
@@ -418,6 +464,74 @@ jobs:
 
           TSAN_OPTIONS=halt_on_error=1 ./crc32_test
 
+  # memmap.h picks between libretro-common's mman shim and the
+  # platform's own <sys/mman.h>, and Emscripten is the target where
+  # that choice is load-bearing: its libc declares mmap with a 64-bit
+  # off_t while the shim declares a 32-bit size_t, so a consumer that
+  # sees both declarations fails to compile, and reserve/commit has no
+  # meaning behind it at all - an anonymous mmap there allocates and
+  # zeroes the whole length, and mprotect and madvise are no-ops.
+  #
+  # None of that is reachable from the native sweep above, which
+  # compiles the sample with every Emscripten branch preprocessed
+  # away.  This lane is where the declarations are held to libc's.
+  emscripten-memmap:
+    name: Emscripten memmap ABI
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    env:
+      # Pinned rather than floating: the job exists to hold a libc ABI,
+      # so the toolchain it is held against changes deliberately.
+      EM_VERSION: 5.0.1
+      EM_CACHE_FOLDER: emsdk-cache
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Cache emsdk
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.EM_CACHE_FOLDER }}
+          key: ${{ env.EM_VERSION }}-${{ runner.os }}
+
+      - name: Set up Emscripten
+        uses: emscripten-core/setup-emsdk@v15
+        with:
+          version: ${{ env.EM_VERSION }}
+          actions-cache-folder: ${{ env.EM_CACHE_FOLDER }}
+
+      - name: Run the memmap sample under node
+        shell: bash
+        working-directory: libretro-common/samples/memmap/emscripten_mmap
+        run: |
+          set -eu
+          set -o pipefail
+          # Fails to compile without the libc declaration; the mmap
+          # assignment through an off_t-typed function pointer is the
+          # discriminator.  The mprotect / reserve / msync checks that
+          # follow it cover the calls the same header choice hands to
+          # libc.
+          make clean
+          make check-wasm
+
+      - name: Compile vfs_implementation.c with file mappings enabled
+        shell: bash
+        working-directory: libretro-common
+        run: |
+          set -eu
+          set -o pipefail
+          # The in-tree translation unit that includes memmap.h and
+          # <sys/mman.h> together.  Makefile.emscripten does not set
+          # HAVE_MMAP today, so nothing else compiles this shape for
+          # wasm - which is exactly why the two declarations can drift
+          # apart unnoticed until a downstream consumer hits it.
+          emcc -std=c89 -D_GNU_SOURCE -DHAVE_MMAP \
+             -Wall -Wextra -Werror \
+             -I include -c vfs/vfs_implementation.c \
+             -o "$RUNNER_TEMP/vfs_implementation.o"
+
   # Cross-architecture validation lane for retro_atomic_test.
   #
   # The samples job above runs on x86_64, which is a strongly-ordered
@@ -448,12 +562,26 @@ jobs:
 
     steps:
       - name: Install dependencies
+        timeout-minutes: 5
         run: |
-          sudo apt-get update -y
-          sudo apt-get install -y clang
+          # clang ships on the stock ubuntu-latest image; apt is only
+          # contacted if the image ever drops it.
+          if dpkg -s clang >/dev/null 2>&1; then
+            echo "clang already present on runner image; skipping apt."
+            exit 0
+          fi
+          for i in 1 2 3; do
+            sudo timeout 90 apt-get update -y \
+              -o Acquire::Retries=3 -o Acquire::http::Timeout=30 && break
+            echo "apt-get update failed (attempt $i); retrying in 10s"
+            sleep 10
+          done
+          sudo apt-get install -y \
+            -o Acquire::Retries=3 -o Acquire::http::Timeout=30 \
+            clang
 
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v5
 
       - name: Build fuzz target
         shell: bash
@@ -465,6 +593,7 @@ jobs:
             -fno-sanitize-recover=all \
             -I$LC/include -o config_file_fuzz config_file_fuzz.c \
             $LC/file/config_file.c \
+            $LC/string/rstrtod.c \
             $LC/file/file_path.c \
             $LC/compat/compat_strl.c \
             $LC/compat/compat_strcasestr.c \
@@ -518,12 +647,20 @@ jobs:
 
     steps:
       - name: Install dependencies
+        timeout-minutes: 5
         run: |
-          sudo apt-get update -y
-          sudo apt-get install -y build-essential ${{ matrix.apt_pkgs }} qemu-user-static
+          for i in 1 2 3; do
+            sudo timeout 90 apt-get update -y \
+              -o Acquire::Retries=3 -o Acquire::http::Timeout=30 && break
+            echo "apt-get update failed (attempt $i); retrying in 10s"
+            sleep 10
+          done
+          sudo apt-get install -y \
+            -o Acquire::Retries=3 -o Acquire::http::Timeout=30 \
+            build-essential ${{ matrix.apt_pkgs }} qemu-user-static
 
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v5
 
       - name: Build retro_atomic_test for ${{ matrix.arch }}
         working-directory: libretro-common/samples/atomic/retro_atomic_test
@@ -627,12 +764,20 @@ jobs:
 
     steps:
       - name: Install dependencies
+        timeout-minutes: 5
         run: |
-          sudo apt-get update -y
-          sudo apt-get install -y build-essential ${{ matrix.apt_pkgs }} qemu-user-static
+          for i in 1 2 3; do
+            sudo timeout 90 apt-get update -y \
+              -o Acquire::Retries=3 -o Acquire::http::Timeout=30 && break
+            echo "apt-get update failed (attempt $i); retrying in 10s"
+            sleep 10
+          done
+          sudo apt-get install -y \
+            -o Acquire::Retries=3 -o Acquire::http::Timeout=30 \
+            build-essential ${{ matrix.apt_pkgs }} qemu-user-static
 
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v5
 
       - name: Build crc32_test for ${{ matrix.name }}
         working-directory: libretro-common/samples/encodings/crc32

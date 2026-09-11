@@ -1337,7 +1337,6 @@ static const struct
    char s_012938fb[27];
    char s_a747cdc9[48];
    char s_2f169651[23];
-   char s_73674a86[22];
    char s_705eee28[46];
    char s_62af62ac[41];
    char s_97379d00[20];
@@ -1459,7 +1458,6 @@ static const struct
    char s_74b77b4a[17];
    char s_7534cfc9[12];
    char s_36259b63[13];
-   char s_37368130[16];
    char s_d51f54a2[12];
    char s_b35f573c[10];
    char s_1cad7751[11];
@@ -1856,6 +1854,7 @@ static const struct
    char s_2c296537[17];
    char s_43ac80a0[11];
    char s_6959ce80[12];
+   char s_aa628249[7];
    char s_ebe994b4[17];
    char s_1c62c301[7];
    char s_a8bb35b6[11];
@@ -3175,7 +3174,6 @@ static const struct
    char s_36033606[178];
    char s_2e69508b[350];
    char s_7e96b5ce[40];
-   char s_3547866d[144];
 #if defined(RARCH_MOBILE)
    char s_82c9e375[169];
    char s_82c9e376[152];
@@ -5395,7 +5393,6 @@ static const struct
    "Faktor m\304\233\305\231\303\255tka miniatur",
    "Zkracov\303\241n\303\255 n\303\241zv\305\257 Playlistu (nutn\303\275 restart)",
    "Pou\305\276\303\255t re\305\276im PAL60r",
-   "Nad\305\231azen\303\275 adres\303\241\305\231",
    "Pozastaven\303\255 obsahu kdy\305\276 je aktivovan\303\251 menu",
    "Pozastaven\303\255 obsahu kdy\305\276 nen\303\255 aktivn\303\255",
    "Po\304\215\303\255tadla v\303\275konu",
@@ -5520,7 +5517,6 @@ static const struct
    "&Vylo\305\276it j\303\241dro",
    "&N\303\241pov\304\233da",
    "O RetroArchu",
-   "P\305\231isp\304\233vatel\303\251",
    "Dokumentace",
    "Vy\304\215istit",
    "&N\303\241stroje",
@@ -5930,6 +5926,7 @@ static const struct
    "N\303\241zev Frontendu",
    "Verze Gitu",
    "Verze Lakky",
+   "Pokrok",
    "Zdroj nap\303\241jen\303\255",
    "Nabito",
    "Nab\303\255jen\303\255",
@@ -8137,9 +8134,6 @@ static const struct
    "\303\255 krokov\303\241n\303\255 sn\303\255mk\305\257 p\305\231i spu\305\241t\304\233n\303\255 n"
    "ap\305\231. obsahu s 30 fps na displeji s 60 Hz nebo obsahu s 60 fps na displeji se 120 Hz.",
    "Zm\304\233nit nastaven\303\255 synchronizace videa.",
-   "Zvy\305\241uje v\303\275kon za cenu zpo\305\276d\304\233n\303\255 a v\304\233t\305\241\303\255ho"
-   " zadrh\303\241v\303\241n\303\255 videa. Pou\305\276ijte pouze v p\305\231\303\255pad\304\233, "
-   "\305\276e nelze dos\303\241hnout pln\303\251 rychlosti jinak.",
 #if defined(RARCH_MOBILE)
    "Vodorovn\303\241 poloha obsahu, kdy\305\276 je zobrazovac\303\255 plocha \305\241ir\305\241\303"
    "\255 ne\305\276 \305\241\303\255\305\231ka obsahu. 0,0 je zcela vlevo, 0,5 je uprost\305\231ed, "
@@ -8813,7 +8807,7 @@ static const struct
  * compiler that pads this struct fails here instead of
  * misindexing at runtime. */
 typedef char msg_hash_cs_blob_check[
-      (sizeof(msg_hash_cs_blob) == (163270u
+      (sizeof(msg_hash_cs_blob) == (163095u
 #ifdef ANDROID
        + 390u
 #endif
@@ -9419,7 +9413,6 @@ static const uint32_t msg_hash_cs_ids[] =
    (uint32_t)MENU_ENUM_LABEL_VALUE_ANDROID_INPUT_DISCONNECT_WORKAROUND,
    (uint32_t)MENU_ENUM_LABEL_VALUE_APPICON_SETTINGS,
    (uint32_t)MENU_ENUM_LABEL_VALUE_ASSETS_DIRECTORY,
-   (uint32_t)MENU_ENUM_LABEL_VALUE_AUDIO_BLOCK_FRAMES,
    (uint32_t)MENU_ENUM_LABEL_VALUE_AUDIO_DEVICE,
    (uint32_t)MENU_ENUM_LABEL_VALUE_AUDIO_DRIVER,
    (uint32_t)MENU_ENUM_LABEL_VALUE_AUDIO_DSP_PLUGIN_REMOVE,
@@ -10500,7 +10493,6 @@ static const uint32_t msg_hash_cs_ids[] =
    (uint32_t)MENU_ENUM_LABEL_VALUE_OZONE_THUMBNAIL_SCALE_FACTOR,
    (uint32_t)MENU_ENUM_LABEL_VALUE_OZONE_TRUNCATE_PLAYLIST_NAME,
    (uint32_t)MENU_ENUM_LABEL_VALUE_PAL60_ENABLE,
-   (uint32_t)MENU_ENUM_LABEL_VALUE_PARENT_DIRECTORY,
    (uint32_t)MENU_ENUM_LABEL_VALUE_PAUSE_LIBRETRO,
    (uint32_t)MENU_ENUM_LABEL_VALUE_PAUSE_NONACTIVE,
    (uint32_t)MENU_ENUM_LABEL_VALUE_PERFCNT_ENABLE,
@@ -10622,7 +10614,6 @@ static const uint32_t msg_hash_cs_ids[] =
    (uint32_t)MENU_ENUM_LABEL_VALUE_QT_MENU_FILE_UNLOAD_CORE,
    (uint32_t)MENU_ENUM_LABEL_VALUE_QT_MENU_HELP,
    (uint32_t)MENU_ENUM_LABEL_VALUE_QT_MENU_HELP_ABOUT,
-   (uint32_t)MENU_ENUM_LABEL_VALUE_QT_MENU_HELP_ABOUT_CONTRIBUTORS,
    (uint32_t)MENU_ENUM_LABEL_VALUE_QT_MENU_HELP_DOCUMENTATION,
    (uint32_t)MENU_ENUM_LABEL_VALUE_QT_MENU_SEARCH_CLEAR,
    (uint32_t)MENU_ENUM_LABEL_VALUE_QT_MENU_TOOLS,
@@ -11018,6 +11009,7 @@ static const uint32_t msg_hash_cs_ids[] =
    (uint32_t)MENU_ENUM_LABEL_VALUE_SYSTEM_INFO_FRONTEND_NAME,
    (uint32_t)MENU_ENUM_LABEL_VALUE_SYSTEM_INFO_GIT_VERSION,
    (uint32_t)MENU_ENUM_LABEL_VALUE_SYSTEM_INFO_LAKKA_VERSION,
+   (uint32_t)MENU_ENUM_LABEL_VALUE_SYSTEM_INFO_PACING,
    (uint32_t)MENU_ENUM_LABEL_VALUE_SYSTEM_INFO_POWER_SOURCE,
    (uint32_t)MENU_ENUM_LABEL_VALUE_SYSTEM_INFO_POWER_SOURCE_CHARGED,
    (uint32_t)MENU_ENUM_LABEL_VALUE_SYSTEM_INFO_POWER_SOURCE_CHARGING,
@@ -12337,7 +12329,6 @@ static const uint32_t msg_hash_cs_ids[] =
    (uint32_t)MENU_ENUM_SUBLABEL_VIDEO_SMOOTH,
    (uint32_t)MENU_ENUM_SUBLABEL_VIDEO_SWAP_INTERVAL,
    (uint32_t)MENU_ENUM_SUBLABEL_VIDEO_SYNCHRONIZATION_SETTINGS,
-   (uint32_t)MENU_ENUM_SUBLABEL_VIDEO_THREADED,
 #if defined(RARCH_MOBILE)
    (uint32_t)MENU_ENUM_SUBLABEL_VIDEO_VIEWPORT_BIAS_PORTRAIT_X,
    (uint32_t)MENU_ENUM_SUBLABEL_VIDEO_VIEWPORT_BIAS_PORTRAIT_Y,

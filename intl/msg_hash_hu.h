@@ -1416,7 +1416,6 @@ static const struct
    char s_012938fb[34];
    char s_a747cdc9[65];
    char s_2f169651[23];
-   char s_73674a86[4];
    char s_705eee28[47];
    char s_62af62ac[39];
    char s_12b25a4b[53];
@@ -1542,7 +1541,6 @@ static const struct
    char s_74b77b4a[16];
    char s_7534cfc9[8];
    char s_36259b63[22];
-   char s_37368130[17];
    char s_d51f54a2[15];
    char s_b35f573c[8];
    char s_1cad7751[12];
@@ -1899,7 +1897,6 @@ static const struct
    char s_c7bc8298[30];
    char s_e63b035a[20];
    char s_d21d875b[15];
-   char s_ae86fed0[31];
    char s_b12ae22e[20];
    char s_b2d073c7[22];
    char s_1cbc2657[17];
@@ -1966,6 +1963,7 @@ static const struct
    char s_43ac80a0[12];
    char s_6959ce80[14];
    char s_886631ec[17];
+   char s_aa628249[7];
    char s_ebe994b4[14];
    char s_1c62c301[11];
    char s_a8bb35b6[9];
@@ -3294,16 +3292,10 @@ static const struct
 #ifdef HAVE_SMBCLIENT
    char s_3e1e294b[51];
    char s_69c0e487[55];
-   char s_706ff4dc[153];
    char s_a0d1a85c[56];
-   char s_b5966528[28];
    char s_907ef7cc[39];
    char s_b0a46506[45];
-   char s_04624c88[48];
-   char s_91976dbe[57];
    char s_f6492edc[51];
-   char s_9bb85635[38];
-   char s_22a05685[48];
 #endif
    char s_f3bfa8b9[91];
    char s_5fe2cee5[70];
@@ -3448,7 +3440,6 @@ static const struct
    char s_1eebf4f8[114];
    char s_2f2ca2b6[116];
    char s_2c9be635[57];
-   char s_05ec12e6[212];
    char s_b5a603de[65];
    char s_d9c2db25[72];
 #ifdef HAVE_ODROIDGO2
@@ -3491,7 +3482,6 @@ static const struct
    char s_d62ed5dc[363];
    char s_2e69508b[328];
    char s_7e96b5ce[41];
-   char s_3547866d[159];
    char s_c2314d30[200];
 #if defined(RARCH_MOBILE)
    char s_82c9e375[168];
@@ -5830,7 +5820,6 @@ static const struct
    "J\303\241t\303\251klista nev\303\251nek r\303\266vid\303\255t\303\251se (\303\272jraind\303\255t"
    "\303\241s sz\303\274ks\303\251ges)",
    "PAL60 m\303\263d haszn\303\241lata",
-   "Fel",
    "Tartalom meg\303\241ll\303\255t\303\241sa, amikor a men\303\274 akt\303\255v",
    "Tartalom meg\303\241ll\303\255t\303\241sa, ha nem akt\303\255v",
    "Tartalom meg\303\241ll\303\255t\303\241sa kontroller lev\303\241laszt\303\241sakor",
@@ -5960,7 +5949,6 @@ static const struct
    "Mag &bez\303\241r\303\241sa",
    "&S\303\272g\303\263",
    "A RetroArch n\303\251vjegye",
-   "K\303\266zrem\305\261k\303\266d\305\221k",
    "Dokument\303\241ci\303\263",
    "T\303\266r\303\266l",
    "&Eszk\303\266z\303\266k",
@@ -6338,7 +6326,6 @@ static const struct
    "SMB h\303\241l\303\263zati be\303\241ll\303\255t\303\241sok",
    "SMB megoszt\303\241s neve",
    "SMB megoszt\303\241s",
-   "SMB alk\303\266nyvt\303\241r (opcion\303\241lis)",
    "SMB id\305\221t\303\272ll\303\251p\303\251s",
    "SMB felhaszn\303\241l\303\263n\303\251v",
    "SMB munkacsoport",
@@ -6407,6 +6394,7 @@ static const struct
    "Git verzi\303\263",
    "Lakka verzi\303\263",
    "MoltenVK verzi\303\263",
+   "Temp\303\263",
    "T\303\241pell\303\241t\303\241s",
    "Felt\303\266ltve",
    "T\303\266lt\303\251s",
@@ -8610,19 +8598,10 @@ static const struct
 #ifdef HAVE_SMBCLIENT
    "A k\303\266rnyezet \303\241ltal haszn\303\241lt hiteles\303\255t\303\251si m\303\263d.",
    "F\303\241jlok b\303\266ng\303\251sz\303\251se a be\303\241ll\303\255tott SMB megoszt\303\241son.",
-   "Hozz\303\241f\303\251r\303\251s az SMB h\303\241l\303\263zati megoszt\303\241sokhoz. Megb\303"
-   "\255zhat\303\263 kapcsolathoz az Ethernet sokkal ink\303\241bb aj\303\241nlott, mint a Wi-Fi. "
-   "\303\232jraind\303\255t\303\241st ig\303\251nyel.",
    "A k\303\266rnyezet \303\241ltal haszn\303\241lhat\303\263 maxim\303\241lis kapcsolat.",
-   "Jelsz\303\263 a hiteles\303\255t\303\251shez.",
    "A kiszolg\303\241l\303\263 IP c\303\255me vagy hostneve.",
    "Az SMB h\303\241l\303\263zati megoszt\303\241s be\303\241ll\303\255t\303\241sai.",
-   "Az el\303\251rni k\303\255v\303\241nt h\303\241l\303\263zati megoszt\303\241s neve.",
-   "A megoszt\303\241son bel\303\274li alk\303\266nyvt\303\241r el\303\251r\303\251si \303\272tvonal"
-   "a.",
    "Az alap\303\251rtelmezett id\305\221t\303\272ll\303\251p\303\251s m\303\241sodpercben.",
-   "Felhaszn\303\241l\303\263n\303\251v a hiteles\303\255t\303\251shez.",
-   "A munkacsoport vagy h\303\241l\303\263zati tartom\303\241ny neve.",
 #endif
    "A ment\303\251seket olyan mapp\303\241kba rendezi, amelyeket a tartalom k\303\266nyvt\303\241ra "
    "alapj\303\241n nevez el.",
@@ -8902,10 +8881,6 @@ static const struct
    " okozhat.",
    "A sz\305\261r\305\221k (de nem a shaderek) ut\303\241ni k\303\251p r\303\266gz\303\255t\303\251s"
    "e.",
-   "A k\303\251perny\305\221 f\303\274gg\305\221leges friss\303\255t\303\251si gyakoris\303\241ga. A"
-   " megfelel\305\221 hangbemeneti sebess\303\251g kisz\303\241m\303\255t\303\241s\303\241ra szolg"
-   "\303\241l. Ezt a rendszer figyelmen k\303\255v\303\274l hagyja, ha a \"T\303\266bbsz\303\241las "
-   "megjelen\303\255t\303\251s\" enged\303\251lyezve van.",
    "A k\303\251perny\305\221 pontosan becs\303\274lt friss\303\255t\303\251si gyakoris\303\241ga Hz-"
    "ben.",
    "A k\303\251perny\305\221-illeszt\305\221program \303\241ltal megadott friss\303\255t\303\251si g"
@@ -9004,9 +8979,6 @@ static const struct
    "\241ul 30 fps-es tartalom fut 60 Hz-es k\303\251perny\305\221n, vagy 60 fps-es tartalom 120 Hz-e"
    "s k\303\251perny\305\221n.",
    "A k\303\251p szinkroniz\303\241ci\303\263s be\303\241ll\303\255t\303\241sai.",
-   "Jav\303\255tja a teljes\303\255tm\303\251nyt a k\303\251sleltet\303\251s \303\251s a megjelen"
-   "\303\255t\303\251s folyamatoss\303\241g\303\241nak rov\303\241s\303\241ra. Csak akkor, ha egy"
-   "\303\251bk\303\251nt nem \303\251rhet\305\221 el a teljes sebess\303\251g.",
    "A teljes\303\255tm\303\251ny javulhat a Metal argumentum pufferek haszn\303\241lat\303\241val. N"
    "\303\251h\303\241ny magnak sz\303\274ks\303\251ge lehet erre, de hib\303\241t okozhat egyes shad"
    "erekn\303\251l, k\303\274l\303\266n\303\266sen r\303\251gi hardver vagy OS verzi\303\263 eset"
@@ -9746,7 +9718,7 @@ static const struct
  * compiler that pads this struct fails here instead of
  * misindexing at runtime. */
 typedef char msg_hash_hu_blob_check[
-      (sizeof(msg_hash_hu_blob) == (189374u
+      (sizeof(msg_hash_hu_blob) == (188989u
 #ifdef ANDROID
        + 316u
 #endif
@@ -9878,7 +9850,6 @@ typedef char msg_hash_hu_blob_check[
        + 30u
        + 20u
        + 15u
-       + 31u
        + 20u
        + 22u
        + 17u
@@ -10063,16 +10034,10 @@ typedef char msg_hash_hu_blob_check[
        + 45u
        + 51u
        + 55u
-       + 153u
        + 56u
-       + 28u
        + 39u
        + 45u
-       + 48u
-       + 57u
        + 51u
-       + 38u
-       + 48u
 #endif
 #ifdef HAVE_LAKKA
        + 51u
@@ -10405,7 +10370,6 @@ static const uint32_t msg_hash_hu_ids[] =
    (uint32_t)MENU_ENUM_LABEL_VALUE_APPICON_SETTINGS,
    (uint32_t)MENU_ENUM_LABEL_VALUE_ASSETS_DIRECTORY,
    (uint32_t)MENU_ENUM_LABEL_VALUE_AUDIO_ASIO_CONTROL_PANEL,
-   (uint32_t)MENU_ENUM_LABEL_VALUE_AUDIO_BLOCK_FRAMES,
    (uint32_t)MENU_ENUM_LABEL_VALUE_AUDIO_DEVICE,
    (uint32_t)MENU_ENUM_LABEL_VALUE_AUDIO_DRIVER,
    (uint32_t)MENU_ENUM_LABEL_VALUE_AUDIO_DSP_PLUGIN,
@@ -11559,7 +11523,6 @@ static const uint32_t msg_hash_hu_ids[] =
    (uint32_t)MENU_ENUM_LABEL_VALUE_OZONE_THUMBNAIL_SCALE_FACTOR,
    (uint32_t)MENU_ENUM_LABEL_VALUE_OZONE_TRUNCATE_PLAYLIST_NAME,
    (uint32_t)MENU_ENUM_LABEL_VALUE_PAL60_ENABLE,
-   (uint32_t)MENU_ENUM_LABEL_VALUE_PARENT_DIRECTORY,
    (uint32_t)MENU_ENUM_LABEL_VALUE_PAUSE_LIBRETRO,
    (uint32_t)MENU_ENUM_LABEL_VALUE_PAUSE_NONACTIVE,
    (uint32_t)MENU_ENUM_LABEL_VALUE_PAUSE_ON_DISCONNECT,
@@ -11685,7 +11648,6 @@ static const uint32_t msg_hash_hu_ids[] =
    (uint32_t)MENU_ENUM_LABEL_VALUE_QT_MENU_FILE_UNLOAD_CORE,
    (uint32_t)MENU_ENUM_LABEL_VALUE_QT_MENU_HELP,
    (uint32_t)MENU_ENUM_LABEL_VALUE_QT_MENU_HELP_ABOUT,
-   (uint32_t)MENU_ENUM_LABEL_VALUE_QT_MENU_HELP_ABOUT_CONTRIBUTORS,
    (uint32_t)MENU_ENUM_LABEL_VALUE_QT_MENU_HELP_DOCUMENTATION,
    (uint32_t)MENU_ENUM_LABEL_VALUE_QT_MENU_SEARCH_CLEAR,
    (uint32_t)MENU_ENUM_LABEL_VALUE_QT_MENU_TOOLS,
@@ -12041,7 +12003,6 @@ static const uint32_t msg_hash_hu_ids[] =
    (uint32_t)MENU_ENUM_LABEL_VALUE_SMB_CLIENT_SETTINGS,
    (uint32_t)MENU_ENUM_LABEL_VALUE_SMB_CLIENT_SHARE,
    (uint32_t)MENU_ENUM_LABEL_VALUE_SMB_CLIENT_SMB_SHARE,
-   (uint32_t)MENU_ENUM_LABEL_VALUE_SMB_CLIENT_SUBDIR,
    (uint32_t)MENU_ENUM_LABEL_VALUE_SMB_CLIENT_TIMEOUT,
    (uint32_t)MENU_ENUM_LABEL_VALUE_SMB_CLIENT_USERNAME,
    (uint32_t)MENU_ENUM_LABEL_VALUE_SMB_CLIENT_WORKGROUP,
@@ -12108,6 +12069,7 @@ static const uint32_t msg_hash_hu_ids[] =
    (uint32_t)MENU_ENUM_LABEL_VALUE_SYSTEM_INFO_GIT_VERSION,
    (uint32_t)MENU_ENUM_LABEL_VALUE_SYSTEM_INFO_LAKKA_VERSION,
    (uint32_t)MENU_ENUM_LABEL_VALUE_SYSTEM_INFO_MOLTENVK_VERSION,
+   (uint32_t)MENU_ENUM_LABEL_VALUE_SYSTEM_INFO_PACING,
    (uint32_t)MENU_ENUM_LABEL_VALUE_SYSTEM_INFO_POWER_SOURCE,
    (uint32_t)MENU_ENUM_LABEL_VALUE_SYSTEM_INFO_POWER_SOURCE_CHARGED,
    (uint32_t)MENU_ENUM_LABEL_VALUE_SYSTEM_INFO_POWER_SOURCE_CHARGING,
@@ -13434,16 +13396,10 @@ static const uint32_t msg_hash_hu_ids[] =
 #ifdef HAVE_SMBCLIENT
    (uint32_t)MENU_ENUM_SUBLABEL_SMB_CLIENT_AUTH_MODE,
    (uint32_t)MENU_ENUM_SUBLABEL_SMB_CLIENT_BROWSE,
-   (uint32_t)MENU_ENUM_SUBLABEL_SMB_CLIENT_ENABLE,
    (uint32_t)MENU_ENUM_SUBLABEL_SMB_CLIENT_NUM_CONTEXTS,
-   (uint32_t)MENU_ENUM_SUBLABEL_SMB_CLIENT_PASSWORD,
    (uint32_t)MENU_ENUM_SUBLABEL_SMB_CLIENT_SERVER,
    (uint32_t)MENU_ENUM_SUBLABEL_SMB_CLIENT_SETTINGS,
-   (uint32_t)MENU_ENUM_SUBLABEL_SMB_CLIENT_SHARE,
-   (uint32_t)MENU_ENUM_SUBLABEL_SMB_CLIENT_SUBDIR,
    (uint32_t)MENU_ENUM_SUBLABEL_SMB_CLIENT_TIMEOUT,
-   (uint32_t)MENU_ENUM_SUBLABEL_SMB_CLIENT_USERNAME,
-   (uint32_t)MENU_ENUM_SUBLABEL_SMB_CLIENT_WORKGROUP,
 #endif
    (uint32_t)MENU_ENUM_SUBLABEL_SORT_SAVEFILES_BY_CONTENT_ENABLE,
    (uint32_t)MENU_ENUM_SUBLABEL_SORT_SAVEFILES_ENABLE,
@@ -13588,7 +13544,6 @@ static const uint32_t msg_hash_hu_ids[] =
    (uint32_t)MENU_ENUM_SUBLABEL_VIDEO_OVERSCAN_CORRECTION_BOTTOM,
    (uint32_t)MENU_ENUM_SUBLABEL_VIDEO_OVERSCAN_CORRECTION_TOP,
    (uint32_t)MENU_ENUM_SUBLABEL_VIDEO_POST_FILTER_RECORD,
-   (uint32_t)MENU_ENUM_SUBLABEL_VIDEO_REFRESH_RATE,
    (uint32_t)MENU_ENUM_SUBLABEL_VIDEO_REFRESH_RATE_AUTO,
    (uint32_t)MENU_ENUM_SUBLABEL_VIDEO_REFRESH_RATE_POLLED,
 #ifdef HAVE_ODROIDGO2
@@ -13631,7 +13586,6 @@ static const uint32_t msg_hash_hu_ids[] =
    (uint32_t)MENU_ENUM_SUBLABEL_VIDEO_SWAPCHAIN_BIT_DEPTH,
    (uint32_t)MENU_ENUM_SUBLABEL_VIDEO_SWAP_INTERVAL,
    (uint32_t)MENU_ENUM_SUBLABEL_VIDEO_SYNCHRONIZATION_SETTINGS,
-   (uint32_t)MENU_ENUM_SUBLABEL_VIDEO_THREADED,
    (uint32_t)MENU_ENUM_SUBLABEL_VIDEO_USE_METAL_ARG_BUFFERS,
 #if defined(RARCH_MOBILE)
    (uint32_t)MENU_ENUM_SUBLABEL_VIDEO_VIEWPORT_BIAS_PORTRAIT_X,
