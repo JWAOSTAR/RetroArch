@@ -1089,6 +1089,9 @@ static const float ozone_sidebar_background_purple_rain[16] = {
 static const float ozone_background_libretro_running_gray_dark[16]          =
    COLOR_HEX_TO_FLOAT(0x101010, 1.0f);
 
+static const float ozone_background_libretro_running_red_dark[16]          =
+   COLOR_HEX_TO_FLOAT(0x1A1A1A, 1.0f);
+
 static const float ozone_background_libretro_running_gray_light[16]         =
    COLOR_HEX_TO_FLOAT(0x202020, 1.0f);
 
@@ -1183,6 +1186,8 @@ static const float ozone_background_libretro_running_purple_rain[16] = {
 };
 
 static const float ozone_border_gray[16]                 = COLOR_HEX_TO_FLOAT(0x303030, 1.0f);
+
+static const float ozone_border_red[16]                  = COLOR_HEX_TO_FLOAT(0xFF0000, 1.0f);
 
 static const float ozone_border_0_light[16]              = COLOR_HEX_TO_FLOAT(0x50EFD9, 1.00);
 static const float ozone_border_1_light[16]              = COLOR_HEX_TO_FLOAT(0x0DB6D5, 1.00);
@@ -1663,6 +1668,45 @@ static ozone_theme_t ozone_theme_gray_dark = {
    /* Fancy cursor colors */
    ozone_border_gray,                                    /* cursor_border_0 */
    ozone_border_gray,                                    /* cursor_border_1 */
+
+   {0},                                                  /* textures */
+
+   /* No theme assets */
+   NULL,                                                 /* name */
+};
+
+static ozone_theme_t ozone_theme_red_dark = {
+   /* Background color */
+   COLOR_HEX_TO_FLOAT(0x1A1A1A, 1.0f),                   /* background */
+   ozone_background_libretro_running_red_dark,          /* background_libretro_running */
+
+   /* Float colors for quads and icons */
+   COLOR_HEX_TO_FLOAT(0x000000, 0.0f),                   /* header_footer_separator */
+   COLOR_HEX_TO_FLOAT(0xFFFFFF, 1.0f),                   /* text */
+   COLOR_HEX_TO_FLOAT(0xFF0000, 1.0f),                   /* selection */
+   COLOR_HEX_TO_FLOAT(0xFF0000, 1.0f),                   /* selection_border */
+   COLOR_HEX_TO_FLOAT(0x181818, 1.0f),                   /* entries_border */
+   COLOR_HEX_TO_FLOAT(0xFFFFFF, 1.0f),                   /* entries_icon */
+   COLOR_HEX_TO_FLOAT(0xFFFFFF, 1.0f),                   /* text_selected */
+   COLOR_HEX_TO_FLOAT(0x202020, 1.0f),                   /* message_background */
+
+   /* RGBA colors for text */
+   0xFFFFFFFF,                                           /* text_rgba */
+   0xFF0000FF,                                           /* text_sidebar_rgba */
+   0xFFFFFFFF,                                           /* text_selected_rgba */
+   0x870000FF,                                           /* text_sublabel_rgba */
+
+   /* Screensaver 'tint' (RGB24) */
+   0xFFFFFF,                                             /* screensaver_tint */
+
+   /* Sidebar color */
+   ozone_sidebar_background_gray_dark,                   /* sidebar_background */
+   ozone_sidebar_background_gray_dark,                   /* sidebar_top_gradient */
+   ozone_sidebar_background_gray_dark,                   /* sidebar_bottom_gradient */
+
+   /* Fancy cursor colors */
+   ozone_border_red,                                    /* cursor_border_0 */
+   ozone_border_red,                                    /* cursor_border_1 */
 
    {0},                                                  /* textures */
 

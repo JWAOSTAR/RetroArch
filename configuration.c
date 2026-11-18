@@ -8002,6 +8002,7 @@ static bool config_load_file(const char *path, settings_t *settings)
          "solarized_dark",
          "solarized_light",
          "gray_dark",
+         "red_dark",
          "gray_light",
          "purple_rain",
          "selenium",

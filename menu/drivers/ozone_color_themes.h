@@ -40,6 +40,7 @@
    X("solarized_dark",     ozone_theme_solarized_dark,     MENU_ENUM_LABEL_VALUE_OZONE_COLOR_THEME_SOLARIZED_DARK) \
    X("solarized_light",    ozone_theme_solarized_light,    MENU_ENUM_LABEL_VALUE_OZONE_COLOR_THEME_SOLARIZED_LIGHT) \
    X("gray_dark",          ozone_theme_gray_dark,          MENU_ENUM_LABEL_VALUE_OZONE_COLOR_THEME_GRAY_DARK) \
+   X("red_dark",           ozone_theme_red_dark,           MENU_ENUM_LABEL_VALUE_OZONE_COLOR_THEME_RED_DARK) \
    X("gray_light",         ozone_theme_gray_light,         MENU_ENUM_LABEL_VALUE_OZONE_COLOR_THEME_GRAY_LIGHT) \
    X("purple_rain",        ozone_theme_purple_rain,        MENU_ENUM_LABEL_VALUE_OZONE_COLOR_THEME_PURPLE_RAIN) \
    X("selenium",           ozone_theme_selenium,           MENU_ENUM_LABEL_VALUE_OZONE_COLOR_THEME_SELENIUM) \
